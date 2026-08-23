@@ -47,7 +47,7 @@ of the last search.
 
 ```bash
 cargo run --release -- --budget 5     # think time per engine move in seconds (default 2)
-cargo run --release -- --hints        # start with LLM hints enabled
+cargo run --release -- --no-hints     # start without LLM hints (they are on by default)
 ```
 
 ### Control socket (`src/server.rs`)
@@ -66,7 +66,7 @@ Replies contain the board (`rows`, top row first, `R`/`Y`/`.`), `status`
 `to_move`, `history` (columns played so far), `last_search`
 (engine column, depth, nodes, millis, score) and, when enabled, `hints`.
 
-### LLM hints (`src/hints.rs`) — optional, off by default
+### LLM hints (`src/hints.rs`) — optional, on by default
 
 When LLMs play over the socket their losses are mostly bookkeeping errors
 (miscounting a column's height, overlooking a vertical three), not strategy.
@@ -77,10 +77,10 @@ To separate the two, the state can carry one-ply tactical hints:
 * `must_block` — columns where the opponent wins next move
 * `losing_moves` — columns after which the opponent has an immediate win
 
-This is **assistance for the client only**; the engine never sees it. Toggle
-with `H` in the GUI, `--hints` at startup, `{"cmd":"hints","on":…}` on the
-socket or the `connect4_hints` MCP tool, and compare a model's results with
-and without.
+This is **assistance for the client only**; the engine never sees it. On by
+default; toggle with `H` in the GUI, `--no-hints` at startup,
+`{"cmd":"hints","on":…}` on the socket or the `connect4_hints` MCP tool, and
+compare a model's results with and without.
 
 ### MCP server (`src/mcp.rs`)
 
@@ -185,8 +185,8 @@ always: start the GUI, register the MCP server, then ask the model to play.
    > connect4_move calls until the game is over. Think about threats and
    > parity before each move.
 
-   Add "call connect4_hints with on=true first" to give the model the
-   tactical bookkeeping; leave it off to test the model unaided.
+   Hints are on by default; ask the model to call `connect4_hints` with
+   `on=false` first to test it unaided.
 
    The model calls `connect4_new`, then `connect4_move` repeatedly; every
    reply already includes the engine's answer, so one tool call per turn is
@@ -196,14 +196,39 @@ To test a model without an MCP client, drive the socket from any language
 and feed the JSON state into the model's prompt; the protocol is the three
 commands above.
 
-### Result so far
+### Results so far
 
-Claude (Fable 5) vs. the engine, no hints: engine 3 – Claude 0.
-At fixed depth 10: as red Claude lost in 34 plies to a parity/zugzwang fight
-after the engine stacked its diagonals onto Claude's two row‑3 threat squares;
-as yellow Claude lost in 17 plies to a double threat (diagonal + vertical).
-With the 2 s budget (depth 12–14): as red Claude lost in 18 plies after
-miscounting a column height and handing the engine a double diagonal.
+Claude (Fable 5) vs. the engine: **engine 3 – Claude 1**.
+
+Without hints, Claude lost all three games — twice at fixed depth 10 (a
+parity/zugzwang squeeze in 34 plies; a diagonal + vertical double threat in
+17) and once against the 2 s budget (18 plies, after miscounting a column
+height and handing the engine a double diagonal). Every loss traced back to
+a bookkeeping error, not strategy — which is what motivated the hints.
+
+With hints on, Claude (red) beat the engine (2 s budget, depth 12–20):
+
+![Winning board: red wins, the GUI highlighting the c4r1-c1r4 diagonal](docs/winning-board.png)
+
+Protocol of the win (columns 1–7; `Rc`/`Yc` = red/yellow drop in column c):
+
+| # | moves | note |
+|---|-------|------|
+| 1–6 | R4 Y4, R4 Y4, R5 Y6 | centre stack, then both extend row 1 |
+| 7–12 | R3 Y2, R5 Y4, R5 Y5 | red builds column 5 / row 3; yellow takes c4r4/c4r5 |
+| 13–14 | R5 Y4 | **c5r5**: kills the two yellow diagonals through that hinge (they decided game 3); yellow fills column 4 |
+| 15–16 | R1 Y5 | **c1r1** prophylaxis: the a1–d4 diagonal is dead for good |
+| 17–20 | R3 Y1, R3 Y3 | red takes **c3r3** (row 3 trio) — engine eval drops to −1000: column 2 is frozen, c2r3 wins for both sides but red's claim sits below |
+| 21–24 | R6 Y6, R6 Y7 | forced sequence in column 6: yellow must block row 3, red must block row 4 |
+| 25–26 | R7 Y1 | hint-flagged forced block: c7r2 would have completed yellow's c4r5–c7r2 diagonal |
+| 27–28 | R1 Y1 | red breaks yellow's column-1 vertical |
+| 29–34 | R7 Y1, R7 Y7, R7 Y6 | red's **column-7 vertical threat** forces yellow's block — the tempo gain that wins the zugzwang |
+| 35–38 | R6 Y3, R3 Y2 | red seals row 6, blocks c3r6; yellow is out of safe squares and must enter column 2 |
+| 39 | **R2** | c2r3 completes two fours at once: 2-3-4-5 on row 3 and the c4r1–c1r4 diagonal (highlighted in the screenshot) — red wins |
+
+The hints did exactly what they were built for: they caught the two forced
+blocks and kept the column heights straight, while the strategy (the c5r5
+prophylaxis, freezing column 2, the tempo fight) was the model's own.
 
 
 ### Notes

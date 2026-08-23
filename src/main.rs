@@ -10,10 +10,10 @@ use std::time::Duration;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
-/// Usage: connect4-rs [--budget <seconds>] [--hints]
+/// Usage: connect4-rs [--budget <seconds>] [--no-hints]
 fn parse_args() -> (Duration, bool) {
     let mut budget = DEFAULT_BUDGET;
-    let mut hints = false;
+    let mut hints = true;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -28,9 +28,10 @@ fn parse_args() -> (Duration, bool) {
                 }
             }
             "--hints" => hints = true,
+            "--no-hints" => hints = false,
             "-h" | "--help" => {
                 println!(
-                    "usage: connect4-rs [--budget <seconds>] [--hints]\n  --budget  think time per engine move (default {})\n  --hints   start with LLM assistance hints in the socket/MCP state (toggle with H)",
+                    "usage: connect4-rs [--budget <seconds>] [--no-hints]\n  --budget    think time per engine move (default {})\n  --no-hints  start without LLM assistance hints in the socket/MCP state (toggle with H)",
                     DEFAULT_BUDGET.as_secs_f64()
                 );
                 std::process::exit(0);
