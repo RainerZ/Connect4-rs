@@ -142,25 +142,52 @@ impl eframe::App for App {
                 heading
             };
             ui.heading(heading);
-            let mut info = format!(
+            ui.label(format!(
                 "You: {}   Engine: {}",
                 if g.human == Piece::Red { "Red" } else { "Yellow" },
                 if g.engine() == Piece::Red { "Red" } else { "Yellow" },
-            );
-            if thinking {
-                info += &format!(
-                    "\nsearching depth {}  nodes {}",
+            ));
+            let line2 = if thinking {
+                format!(
+                    "searching depth {}  nodes {}",
                     self.shared.stats.depth.load(Ordering::Relaxed),
                     self.shared.stats.nodes.load(Ordering::Relaxed)
-                );
+                )
             } else if let Some(ls) = &g.last_search {
-                info += &format!(
-                    "\nlast engine move: col {}  score {}  depth {}  nodes {}  {} ms ({:.1} Mnodes/s)",
+                format!(
+                    "last engine move: col {}  score {}  depth {}  nodes {}  {} ms ({:.1} Mnodes/s)",
                     ls.col, ls.score, ls.depth, ls.nodes, ls.millis,
                     ls.nodes as f64 / (ls.millis.max(1) as f64 * 1000.0)
-                );
-            }
-            ui.label(info);
+                )
+            } else {
+                String::new()
+            };
+            ui.horizontal(|ui| {
+                ui.label(line2);
+                // Small eval bar, right-aligned: red's share of the last
+                // engine score (tanh-scaled, a proven win fills the bar).
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let (bar, _) = ui.allocate_exact_size(egui::vec2(140.0, 12.0), egui::Sense::hover());
+                    let red_score = g.last_search.as_ref().map_or(0.0, |ls| {
+                        let s = if g.engine() == Piece::Red { ls.score } else { -ls.score } as f32;
+                        if s.abs() >= engine::WIN_SCORE as f32 { s.signum() } else { (s / 20.0).tanh() }
+                    });
+                    let p = ui.painter();
+                    p.rect_filled(bar, 3.0, YELLOW);
+                    let w = (0.5 + 0.5 * red_score) * bar.width();
+                    p.rect_filled(
+                        egui::Rect::from_min_size(bar.min, egui::vec2(w, bar.height())),
+                        3.0,
+                        RED,
+                    );
+                    let mid = bar.min.x + bar.width() * 0.5;
+                    p.line_segment(
+                        [egui::pos2(mid, bar.min.y), egui::pos2(mid, bar.max.y)],
+                        egui::Stroke::new(1.0, egui::Color32::from_black_alpha(120)),
+                    );
+                    p.rect_stroke(bar, 3.0, egui::Stroke::new(1.0, egui::Color32::from_gray(90)), egui::StrokeKind::Outside);
+                });
+            });
             ui.add_space(4.0);
 
             // Settings strip: the keyboard shortcuts stay available, this is
@@ -189,17 +216,10 @@ impl eframe::App for App {
             });
             ui.add_space(4.0);
 
-            let bar_w = 20.0;
-            let gap = 8.0;
             let avail = ui.available_size();
-            let cell = ((avail.x - bar_w - gap) / COLS as f32).min(avail.y / ROWS as f32).min(90.0);
+            let cell = (avail.x / COLS as f32).min(avail.y / ROWS as f32).min(90.0);
             let (rect, resp) =
-                ui.allocate_exact_size(egui::vec2(cell * COLS as f32 + bar_w + gap, cell * ROWS as f32), egui::Sense::click());
-            let bar_rect = egui::Rect::from_min_size(
-                egui::pos2(rect.max.x - bar_w, rect.min.y),
-                egui::vec2(bar_w, cell * ROWS as f32),
-            );
-            let rect = egui::Rect::from_min_size(rect.min, egui::vec2(cell * COLS as f32, cell * ROWS as f32));
+                ui.allocate_exact_size(egui::vec2(cell * COLS as f32, cell * ROWS as f32), egui::Sense::click());
             let center_of = |c: usize, r: usize| {
                 egui::pos2(rect.min.x + (c as f32 + 0.5) * cell, rect.max.y - (r as f32 + 0.5) * cell)
             };
@@ -328,33 +348,6 @@ impl eframe::App for App {
                 );
             }
 
-            // Eval bar: red's share of the last engine score (chess style,
-            // red at the bottom). +-1000 (proven win/loss) fills the bar.
-            {
-                let red_score = g.last_search.as_ref().map_or(0.0, |ls| {
-                    let s = if g.engine() == Piece::Red { ls.score } else { -ls.score } as f32;
-                    if s.abs() >= engine::WIN_SCORE as f32 { s.signum() } else { (s / 20.0).tanh() }
-                });
-                let red_frac = 0.5 + 0.5 * red_score;
-                painter.rect_filled(bar_rect, 4.0, YELLOW);
-                let red_top = bar_rect.max.y - red_frac * bar_rect.height();
-                painter.rect_filled(
-                    egui::Rect::from_min_max(egui::pos2(bar_rect.min.x, red_top), bar_rect.max),
-                    4.0,
-                    RED,
-                );
-                let mid = bar_rect.min.y + bar_rect.height() * 0.5;
-                painter.line_segment(
-                    [egui::pos2(bar_rect.min.x, mid), egui::pos2(bar_rect.max.x, mid)],
-                    egui::Stroke::new(1.0, egui::Color32::from_black_alpha(120)),
-                );
-                painter.rect_stroke(
-                    bar_rect,
-                    4.0,
-                    egui::Stroke::new(1.0, egui::Color32::from_gray(90)),
-                    egui::StrokeKind::Outside,
-                );
-            }
         }
         drop(g);
         if changed {
