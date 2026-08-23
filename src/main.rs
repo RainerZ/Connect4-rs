@@ -31,7 +31,7 @@ fn parse_args() -> (Duration, bool) {
             "--no-hints" => hints = false,
             "-h" | "--help" => {
                 println!(
-                    "usage: connect4-rs [--budget <seconds>] [--no-hints]\n  --budget    think time per engine move (default {})\n  --no-hints  start without LLM assistance hints in the socket/MCP state (toggle with H)",
+                    "usage: connect4-rs [--budget <seconds>] [--no-hints]\n  --budget, -b  think time per engine move in seconds (default {})\n  --no-hints    start with LLM hints (socket/MCP state) and the GUI hint rings off;\n                both can be re-enabled at runtime (checkboxes/H, hints command, MCP tool)",
                     DEFAULT_BUDGET.as_secs_f64()
                 );
                 std::process::exit(0);

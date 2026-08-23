@@ -115,9 +115,17 @@ command, see below). The status line shows think time and hint state; while
 the engine thinks it shows the iteration depth and live node count,
 afterwards score, depth, nodes and time of the last search.
 
+Command line options (`connect4-rs --help`):
+
+| option | effect |
+|--------|--------|
+| `--budget <seconds>`, `-b` | think time per engine move (default 2; `+`/`-` and the slider change it at runtime) |
+| `--no-hints` | start with the LLM hints *and* the GUI hint rings off (both re-enablable at runtime) |
+| `--hints` | the default: both on |
+
 ```bash
-cargo run --release -- --budget 5     # think time per engine move in seconds (default 2)
-cargo run --release -- --no-hints     # start without LLM hints (they are on by default)
+cargo run --release -- --budget 5     # a stronger engine: 5 s per move
+cargo run --release -- --no-hints     # bare start: no hints anywhere
 ```
 
 ### Control socket (`src/server.rs`)
