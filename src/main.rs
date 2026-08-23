@@ -163,18 +163,54 @@ impl eframe::App for App {
                 );
             }
             ui.label(info);
-            ui.add_space(8.0);
+            ui.add_space(4.0);
 
+            // Settings strip: the keyboard shortcuts stay available, this is
+            // the discoverable way to reach the same things.
+            ui.horizontal(|ui| {
+                if ui.button("New game").clicked() {
+                    let (es, bud, h) = (g.engine_starts, g.budget, g.hints);
+                    *g = game::Game::new(es, bud, h);
+                    changed = true;
+                }
+                let mut es = g.engine_starts;
+                if ui.checkbox(&mut es, "Engine starts").on_hover_text("Applies to the next new game").changed() {
+                    g.engine_starts = es;
+                }
+                let mut h = g.hints;
+                if ui.checkbox(&mut h, "Hints").changed() {
+                    g.hints = h;
+                }
+                let mut secs = g.budget.as_secs_f64();
+                if ui
+                    .add(egui::Slider::new(&mut secs, 0.05..=60.0).logarithmic(true).text("think time").suffix(" s"))
+                    .changed()
+                {
+                    g.budget = Duration::from_secs_f64(secs);
+                }
+            });
+            ui.add_space(4.0);
+
+            let bar_w = 20.0;
+            let gap = 8.0;
             let avail = ui.available_size();
-            let cell = (avail.x / COLS as f32).min(avail.y / ROWS as f32).min(90.0);
+            let cell = ((avail.x - bar_w - gap) / COLS as f32).min(avail.y / ROWS as f32).min(90.0);
             let (rect, resp) =
-                ui.allocate_exact_size(egui::vec2(cell * COLS as f32, cell * ROWS as f32), egui::Sense::click());
+                ui.allocate_exact_size(egui::vec2(cell * COLS as f32 + bar_w + gap, cell * ROWS as f32), egui::Sense::click());
+            let bar_rect = egui::Rect::from_min_size(
+                egui::pos2(rect.max.x - bar_w, rect.min.y),
+                egui::vec2(bar_w, cell * ROWS as f32),
+            );
+            let rect = egui::Rect::from_min_size(rect.min, egui::vec2(cell * COLS as f32, cell * ROWS as f32));
             let center_of = |c: usize, r: usize| {
                 egui::pos2(rect.min.x + (c as f32 + 0.5) * cell, rect.max.y - (r as f32 + 0.5) * cell)
             };
 
             // Mouse: hovered column, click to drop.
-            let hover_col = resp.hover_pos().map(|p| (((p.x - rect.min.x) / cell) as usize).min(COLS - 1));
+            let hover_col = resp
+                .hover_pos()
+                .filter(|p| rect.contains(*p))
+                .map(|p| (((p.x - rect.min.x) / cell) as usize).min(COLS - 1));
             if resp.clicked()
                 && let Some(c) = hover_col
                 && g.human_move(c)
@@ -291,6 +327,34 @@ impl eframe::App for App {
                     format!("{}", c + 1),
                     egui::FontId::proportional(16.0),
                     ui.visuals().text_color(),
+                );
+            }
+
+            // Eval bar: red's share of the last engine score (chess style,
+            // red at the bottom). +-1000 (proven win/loss) fills the bar.
+            {
+                let red_score = g.last_search.as_ref().map_or(0.0, |ls| {
+                    let s = if g.engine() == Piece::Red { ls.score } else { -ls.score } as f32;
+                    if s.abs() >= engine::WIN_SCORE as f32 { s.signum() } else { (s / 20.0).tanh() }
+                });
+                let red_frac = 0.5 + 0.5 * red_score;
+                painter.rect_filled(bar_rect, 4.0, YELLOW);
+                let red_top = bar_rect.max.y - red_frac * bar_rect.height();
+                painter.rect_filled(
+                    egui::Rect::from_min_max(egui::pos2(bar_rect.min.x, red_top), bar_rect.max),
+                    4.0,
+                    RED,
+                );
+                let mid = bar_rect.min.y + bar_rect.height() * 0.5;
+                painter.line_segment(
+                    [egui::pos2(bar_rect.min.x, mid), egui::pos2(bar_rect.max.x, mid)],
+                    egui::Stroke::new(1.0, egui::Color32::from_black_alpha(120)),
+                );
+                painter.rect_stroke(
+                    bar_rect,
+                    4.0,
+                    egui::Stroke::new(1.0, egui::Color32::from_gray(90)),
+                    egui::StrokeKind::Outside,
                 );
             }
         }

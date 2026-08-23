@@ -50,6 +50,11 @@ keyboard. With hints on, the landing slots of tactically decisive columns
 are marked: green ring = wins now, orange ring = must block, grey ring with
 an x = loses immediately.
 
+A settings strip offers a New-game button, an "engine starts" checkbox
+(applies to the next game), the hints toggle and a logarithmic think-time
+slider (0.05–60 s). Next to the board an eval bar shows red's share of the
+engine's last score, chess-style: middle = balanced, full = proven win.
+
 Keys: `1`–`7` drop a piece, `N`/`Space` new game, `S` swap who starts (and
 start a new game), `+`/`-` double/halve the engine's think time, `H` toggle
 hints (see below). The status line shows think time and hint state; while
