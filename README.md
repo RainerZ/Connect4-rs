@@ -55,6 +55,16 @@ src/
   colour is present, else 0; ±1000 for a completed line. The sum is updated
   incrementally on `make`/`unmake` from per-line piece counts, so a node
   costs O(lines through the played square) (≤13) instead of a full scan.
+* On top of that a threat/parity evaluation (the classic Connect Four
+  knowledge from Victor Allis' thesis): a line with three stones of one
+  colour and one empty square is a *threat* on that square. Threats on the
+  right zugzwang parity (odd rows for the first player, even for the
+  second) score ±24, wrong-parity ones ±6 — and per column only the
+  *lowest* threat square counts, because threats above it only come alive
+  after it resolves (a square both sides threaten goes to the side whose
+  parity matches). Also incremental: threat transitions are detected from
+  the line values already computed, so the hot path pays two extra
+  compares (~13 Mn/s vs ~17 before).
 * Negamax with alpha/beta, column order 4,5,3,2,6,1,7 (centre first),
   principal variation search (first child full window, siblings zero
   window with re-search).
@@ -163,16 +173,15 @@ cargo test --release
 Unit tests in `engine.rs` check the line tables, that the incremental score
 matches a full-scan reference port of the Java evaluation over random
 playouts, that the search finds immediate wins and blocks, and that a real
-zugzwang endgame is proven within the budget; `hints.rs` tests the
-win/block/losing-move detection, and a search with a warm transposition
-table is checked against a plain no-table negamax on positions solved to
-the end of the game. A slower test replays the recorded lost game: at
-ply 18 even a 10 s search cannot prove the loss (it is beyond a depth-20
-horizon), while at ply 20 the loss is proven in about 100 ms. An ignored
-`analyse_recorded_win` helper prints the 10 s evaluation of every engine
-move of that game — with the transposition table and MTD(f) it reaches
-1-4 plies deeper than before and deviates from the recorded line from
-ply 14 on.
+zugzwang endgame is proven within the budget, the threat/parity evaluation
+matches an independent full-scan reference over random playouts and weighs
+odd/even-row threats as intended; a search with a warm transposition table
+is checked against a plain no-table negamax on positions solved to the end
+of the game; `hints.rs` tests the win/block/losing-move detection. A slower
+test replays the recorded lost game: at ply 18 even a 10 s search cannot
+prove the loss (it is beyond a depth-20 horizon), while at ply 20 the loss
+is proven quickly. An ignored `analyse_recorded_win` helper prints the 10 s
+evaluation of every engine move of that game.
 
 Search benchmark (ignored by default, prints depth reached and nodes/s for
 a 0.5 s and a 2 s budget):
@@ -248,7 +257,8 @@ commands above.
 
 ### Results so far
 
-Claude (Fable 5) vs. the engine: **engine 3 – Claude 2**.
+Claude (Fable 5) vs. the engine: **engine 5 – Claude 2** (the
+threat-aware engine: 2 – 0).
 
 Without hints, Claude lost all three games — twice at fixed depth 10 (a
 parity/zugzwang squeeze in 34 plies; a diagonal + vertical double threat in
@@ -279,6 +289,22 @@ Protocol of the win (columns 1–7; `Rc`/`Yc` = red/yellow drop in column c):
 The hints did exactly what they were built for: they caught the two forced
 blocks and kept the column heights straight, while the strategy (the c5r5
 prophylaxis, freezing column 2, the tempo fight) was the model's own.
+(The second Claude win was against the engine of the `transposition-table`
+branch, which deviated from the recorded line exactly where a 10 s analysis
+predicted but lost to the same column-2 freeze and resigned after 19 plies.)
+
+The threat-aware engine of this branch then beat Claude twice, playing a
+visibly different, constructive style at only depth 11–13: in game one it
+stacked two win squares in one column (c5r3 diagonal under c5r4 row) so no
+single block answered; in the rematch Claude avoided every earlier mistake
+- reversed a trap so the engine had to block with a useless stone, killed
+three lines with one prophylactic move - and still lost to a row-5 trio
+whose completion squares were protected by an older diagonal underneath:
+threats defending threats. Where the original evaluation won on tactics
+and Claude's bookkeeping errors, the threat evaluation builds winning
+structures on its own - and its optimism tracked real advantages instead
+of preceding losses. Next experiment: merge this evaluation with the
+`transposition-table` branch's deeper search.
 
 The win reproduces against the stronger engine of this branch
 (transposition table + PVS + MTD(f), depth 13-17 at the same 2 s budget):
@@ -313,6 +339,14 @@ results, and the games against Claude make the differences tangible:
   depth 11–13 it plays a visibly constructive style — stacked win squares,
   threats defending threats — and beat Claude twice.
 
-`main` currently matches `simple-engine`; the plan is to merge the
-improvement branches so `main` ends up with the strongest version while
-each step stays observable in its branch.
+* **`combined-engine`** — this branch: both improvements merged, the
+  threat/parity evaluation searched at transposition-table depth.
+
+Measured on the recorded lost game, the two improvements attack the same
+blindness from opposite sides: the deeper search deviates from the losing
+line where a 10 s analysis predicted but still cannot prove the loss at
+ply 18, while the threat evaluation turns negative from ply 12 on
+(−18/−9/−28/−16 instead of +4…+13) — it senses the frozen-column
+structure plies before it is provable. Each branch README carries the
+detailed numbers; `main` is planned to receive the strongest version
+while each step stays observable in its branch.

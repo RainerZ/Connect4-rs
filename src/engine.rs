@@ -15,6 +15,30 @@ pub const ROWS: usize = 6;
 pub const WIN_SCORE: i32 = 1000;
 pub const INF: i32 = 1_000_000;
 
+/// Threat/parity evaluation (Allis): a line with three stones of one colour
+/// and one empty square is a threat on that square. Two pieces of Connect
+/// Four knowledge go into the value:
+///
+/// * Parity: with normal zugzwang the first player (red) gets the odd rows
+///   (1, 3, 5), the second player the even rows, so a threat on the right
+///   parity is usually convertible and worth much more.
+/// * The lowest threat in a column dominates: threats above it only come
+///   alive after it resolves, so only the lowest threat square per column
+///   is scored (a square that is a threat for both sides goes to the side
+///   whose parity matches the row).
+pub const THREAT_GOOD: i32 = 24;
+pub const THREAT_WEAK: i32 = 6;
+
+/// Signed value of a threat for `pi` (0 = red) on square `sq`.
+#[inline(always)]
+fn threat_value(pi: usize, sq: usize) -> i32 {
+    let row = sq % ROWS; // 0-based: row 0 is the bottom = 1-based row 1 (odd)
+    let odd = row % 2 == 0;
+    let good = if pi == 0 { odd } else { !odd };
+    let v = if good { THREAT_GOOD } else { THREAT_WEAK };
+    if pi == 0 { v } else { -v }
+}
+
 /// Bitboard layout: bit index = col * 7 + row  (7 bits per column, top bit is
 /// a guard so shifts never bleed into the next column).
 const COL_BITS: usize = ROWS + 1;
@@ -155,6 +179,10 @@ pub struct Board {
     /// Sum of all line values (red positive). Identical to the Java
     /// `getBoardScore(board, +1)` unless a line is complete.
     score: i32,
+    /// Sum of the per-column threat values (red positive).
+    threats: i32,
+    /// Per square: number of red / yellow 3-lines whose empty square it is.
+    threat_at: [[u8; 2]; COLS * ROWS],
 }
 
 impl Default for Board {
@@ -165,7 +193,7 @@ impl Default for Board {
 
 impl Board {
     pub fn new() -> Board {
-        Board { bb: [0, 0], height: [0; COLS], total: 0, counts: [[0; 2]; NLINES], score: 0 }
+        Board { bb: [0, 0], height: [0; COLS], total: 0, counts: [[0; 2]; NLINES], score: 0, threats: 0, threat_at: [[0; 2]; COLS * ROWS] }
     }
 
     #[inline]
@@ -200,11 +228,65 @@ impl Board {
         self.total as usize >= COLS * ROWS
     }
 
-    /// Raw evaluation from red's point of view (no win check).
+    /// Raw line-sum evaluation from red's point of view (no win check).
     #[allow(dead_code)]
     #[inline]
     pub fn raw_score(&self) -> i32 {
         self.score
+    }
+
+    /// Parity-weighted threat evaluation from red's point of view.
+    #[allow(dead_code)]
+    #[inline]
+    pub fn threat_score(&self) -> i32 {
+        self.threats
+    }
+
+    /// Value of a column's threats: the lowest threat square decides, its
+    /// owner (parity decides squares shared by both sides) collects the
+    /// parity-weighted value. Threats above the lowest one count nothing -
+    /// they only come alive once it resolves.
+    fn col_threat_value(&self, col: usize) -> i32 {
+        for r in 0..ROWS {
+            let sq = col * ROWS + r;
+            let red = self.threat_at[sq][0] > 0;
+            let yellow = self.threat_at[sq][1] > 0;
+            if red || yellow {
+                let pi = if red && yellow {
+                    if r % 2 == 0 { 0 } else { 1 }
+                } else if red {
+                    0
+                } else {
+                    1
+                };
+                return threat_value(pi, sq);
+            }
+        }
+        0
+    }
+
+    /// A 3-line's empty square appeared (`d = 1`) or disappeared (`d = -1`)
+    /// for `side`; update the per-square counts and the affected column's
+    /// contribution to the threat score.
+    fn threat_change(&mut self, side: usize, esq: usize, d: i8) {
+        let col = esq / ROWS;
+        let before = self.col_threat_value(col);
+        self.threat_at[esq][side] = (self.threat_at[esq][side] as i8 + d) as u8;
+        self.threats += self.col_threat_value(col) - before;
+    }
+
+    /// The (single) empty square of line `l`, ignoring `exclude` (pass
+    /// usize::MAX to ignore nothing). Caller guarantees it exists.
+    #[inline(always)]
+    fn line_empty_sq(&self, l: usize, exclude: usize) -> usize {
+        let occ = self.bb[0] | self.bb[1];
+        for &sq in TABLES.line_squares[l].iter() {
+            let sq = sq as usize;
+            if sq != exclude && occ & (1u64 << (sq / ROWS * COL_BITS + sq % ROWS)) == 0 {
+                return sq;
+            }
+        }
+        unreachable!()
     }
 
     /// Drop a piece. Caller must ensure `can_play(col)`.
@@ -221,10 +303,25 @@ impl Board {
             if l == 0xFF {
                 break;
             }
-            let c = &mut self.counts[l as usize];
+            let l = l as usize;
+            let c = &mut self.counts[l];
             let before = line_value(c[0], c[1]);
             c[pi] += 1;
             delta += line_value(c[0], c[1]) - before;
+            // Threat transitions, detected on the signed line value already
+            // in hand (rare; the common path costs two compares): reaching
+            // three of a colour gains a threat on the remaining empty
+            // square, completing to four or getting blocked loses the
+            // threat whose empty square was sq itself.
+            let signed = if pi == 0 { before } else { -before };
+            if signed == 2 {
+                let esq = self.line_empty_sq(l, usize::MAX);
+                self.threat_change(pi, esq, 1);
+            } else if signed == 3 {
+                self.threat_change(pi, sq, -1);
+            } else if signed == -3 {
+                self.threat_change(pi ^ 1, sq, -1);
+            }
         }
         self.score += delta;
     }
@@ -243,10 +340,25 @@ impl Board {
             if l == 0xFF {
                 break;
             }
-            let c = &mut self.counts[l as usize];
+            let l = l as usize;
+            let c = &mut self.counts[l];
             let before = line_value(c[0], c[1]);
             c[pi] -= 1;
-            delta += line_value(c[0], c[1]) - before;
+            let after = line_value(c[0], c[1]);
+            delta += after - before;
+            // Threat transitions, mirroring make (the after-state here is
+            // the before-state there), detected on the signed line value.
+            let signed = if pi == 0 { after } else { -after };
+            if signed == 2 {
+                // Line was a threat; its empty square was the one that is
+                // not sq (sq was occupied before this unmake).
+                let esq = self.line_empty_sq(l, sq);
+                self.threat_change(pi, esq, -1);
+            } else if signed == 3 {
+                self.threat_change(pi, sq, 1);
+            } else if signed == -3 {
+                self.threat_change(pi ^ 1, sq, 1);
+            }
         }
         self.score += delta;
     }
@@ -286,8 +398,9 @@ impl Board {
         None
     }
 
-    /// Board score for player `p` exactly as the Java `getBoardScore`.
-    /// +-WIN_SCORE if a line is complete, otherwise the signed line-value sum.
+    /// Board score for player `p`: +-WIN_SCORE if a line is complete,
+    /// otherwise the Java line-value sum plus the parity-weighted threat
+    /// values, clamped so a heuristic score can never look like a win.
     #[inline(always)]
     pub fn score_for(&self, p: Piece) -> i32 {
         if self.has_won(Piece::Red) {
@@ -296,7 +409,7 @@ impl Board {
         if self.has_won(Piece::Yellow) {
             return -p.sign() * WIN_SCORE;
         }
-        p.sign() * self.score
+        p.sign() * (self.score + self.threats).clamp(-(WIN_SCORE - 1), WIN_SCORE - 1)
     }
 
     /// Unique 49-bit position key for the side to move (Pascal Pons'
@@ -675,6 +788,49 @@ mod tests {
         }
     }
 
+    /// Reference threat evaluation: full scan over all lines, then the
+    /// column rule (lowest threat square decides, shared squares go to the
+    /// side whose parity matches).
+    fn threat_ref(b: &Board) -> i32 {
+        let mut at = [[false; 2]; COLS * ROWS];
+        for l in 0..NLINES {
+            let (mut red, mut yellow, mut empty, mut esq) = (0, 0, 0, 0);
+            for &sq in TABLES.line_squares[l].iter() {
+                let (c, r) = (sq as usize / ROWS, sq as usize % ROWS);
+                match b.get(c, r) {
+                    Some(Piece::Red) => red += 1,
+                    Some(Piece::Yellow) => yellow += 1,
+                    None => {
+                        empty += 1;
+                        esq = sq as usize;
+                    }
+                }
+            }
+            if empty == 1 && (red == 3 || yellow == 3) {
+                at[esq][if red == 3 { 0 } else { 1 }] = true;
+            }
+        }
+        let mut t = 0;
+        for col in 0..COLS {
+            for r in 0..ROWS {
+                let sq = col * ROWS + r;
+                let (red, yellow) = (at[sq][0], at[sq][1]);
+                if red || yellow {
+                    let pi = if red && yellow {
+                        if r % 2 == 0 { 0 } else { 1 }
+                    } else if red {
+                        0
+                    } else {
+                        1
+                    };
+                    t += threat_value(pi, sq);
+                    break;
+                }
+            }
+        }
+        t
+    }
+
     #[test]
     fn incremental_matches_full_scan() {
         // pseudo random playouts
@@ -698,8 +854,14 @@ mod tests {
                 b.make(c, p);
                 hist[n] = (c, p);
                 n += 1;
-                assert_eq!(b.score_for(Piece::Red), java_score(&b, Piece::Red));
-                assert_eq!(b.score_for(Piece::Yellow), java_score(&b, Piece::Yellow));
+                assert_eq!(b.threat_score(), threat_ref(&b));
+                if !b.has_won(p) {
+                    assert_eq!(b.raw_score(), java_score(&b, Piece::Red));
+                    assert_eq!(b.score_for(Piece::Red), (java_score(&b, Piece::Red) + threat_ref(&b)).clamp(-999, 999));
+                    assert_eq!(b.score_for(Piece::Yellow), -b.score_for(Piece::Red));
+                } else {
+                    assert_eq!(b.score_for(p), WIN_SCORE);
+                }
                 assert_eq!(b.has_won(p), b.winning_line().is_some());
                 if b.has_won(p) {
                     break;
@@ -710,9 +872,10 @@ mod tests {
                 n -= 1;
                 let (c, p) = hist[n];
                 b.unmake(c, p);
-                assert_eq!(b.score_for(Piece::Red), java_score(&b, Piece::Red));
+                assert_eq!(b.threat_score(), threat_ref(&b));
             }
             assert_eq!(b.raw_score(), 0);
+            assert_eq!(b.threat_score(), 0);
         }
     }
 
@@ -791,6 +954,31 @@ mod tests {
             let got = Searcher::fixed_depth(&b, p, remaining, &stats, &mut tt);
             assert_eq!(got, want, "position {tested} (total {})", b.total());
         }
+    }
+
+    /// Odd-row threats are strong for red, even-row threats weak.
+    #[test]
+    fn threat_parity_weights() {
+        // Red c2r1, c3r1, c4r1: two horizontal threats with empty squares on
+        // row 1 (odd) - the good parity for red.
+        let mut b = Board::new();
+        b.make(1, Piece::Red);
+        b.make(2, Piece::Red);
+        b.make(3, Piece::Red);
+        assert_eq!(b.threat_score(), 2 * THREAT_GOOD);
+        // Red stacked c1r1-r3: one vertical threat with the empty square on
+        // row 4 (even) - the wrong parity for red.
+        let mut b = Board::new();
+        for _ in 0..3 {
+            b.make(0, Piece::Red);
+        }
+        assert_eq!(b.threat_score(), THREAT_WEAK);
+        // Mirrored for yellow: even rows are yellow's good parity.
+        let mut b = Board::new();
+        for _ in 0..3 {
+            b.make(0, Piece::Yellow);
+        }
+        assert_eq!(b.threat_score(), -THREAT_GOOD);
     }
 
     /// The recorded game the engine lost to Claude (red, with hints; see
