@@ -1,6 +1,6 @@
 //! Game state shared between GUI, engine thread and the control socket.
 
-use crate::engine::{Board, Piece, SearchStats, Searcher, COLS, ROWS};
+use crate::engine::{Board, Piece, SearchStats, Searcher, TransTable, COLS, ROWS};
 use crate::hints::{self, Hints};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Condvar, Mutex};
@@ -225,6 +225,7 @@ impl Shared {
     /// Engine thread body: whenever it is the engine's turn, search and play.
     pub fn engine_loop(self: Arc<Self>) {
         raise_thread_priority();
+        let mut tt = TransTable::new();
         loop {
             let (board, p, budget) = {
                 let mut g = self.game.lock().unwrap();
@@ -234,7 +235,7 @@ impl Shared {
                 (g.board, g.engine(), g.budget)
             };
             let t0 = Instant::now();
-            let r = Searcher::best_move(&board, p, budget, &self.stats);
+            let r = Searcher::best_move(&board, p, budget, &self.stats, &mut tt);
             let millis = t0.elapsed().as_millis();
             let mut g = self.game.lock().unwrap();
             // Make sure the game was not restarted meanwhile.
@@ -288,7 +289,8 @@ mod tests {
         let mut g = replay(&[4, 4, 4, 4, 5, 6, 3, 2, 5, 4, 5, 5, 5, 4, 1, 5, 3, 1, 3]);
         g.status = Status::Thinking;
         let stats = crate::engine::SearchStats::default();
-        let r = crate::engine::Searcher::best_move(&g.board, Piece::Yellow, Duration::from_secs(5), &stats);
+        let mut tt = crate::engine::TransTable::new();
+        let r = crate::engine::Searcher::best_move(&g.board, Piece::Yellow, Duration::from_secs(5), &stats, &mut tt);
         assert_eq!(r.score, -WIN_SCORE);
         g.apply_engine_result(&EngineMove { col: r.col, score: r.score, depth: r.depth, nodes: r.nodes, millis: 0 });
         assert!(g.resigned);
@@ -304,7 +306,8 @@ mod tests {
         let mut g = replay(&[4, 4, 4, 4, 3, 2, 5, 6, 3, 4, 5, 4, 3, 3, 5, 5, 5, 5, 7, 7, 1, 1, 7, 3, 1, 3, 7]);
         g.status = Status::Thinking;
         let stats = crate::engine::SearchStats::default();
-        let r = crate::engine::Searcher::best_move(&g.board, Piece::Yellow, Duration::from_secs(5), &stats);
+        let mut tt = crate::engine::TransTable::new();
+        let r = crate::engine::Searcher::best_move(&g.board, Piece::Yellow, Duration::from_secs(5), &stats, &mut tt);
         assert_eq!(r.score, WIN_SCORE);
         g.apply_engine_result(&EngineMove { col: r.col, score: r.score, depth: r.depth, nodes: r.nodes, millis: 0 });
         assert!(!g.resigned);
