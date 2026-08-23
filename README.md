@@ -267,16 +267,27 @@ blocks and kept the column heights straight, while the strategy (the c5r5
 prophylaxis, freezing column 2, the tempo fight) was the model's own.
 
 
-### Ideas for the engine
+### Branches: watching the engine get stronger
 
-Ways the engine could handle such positions knowingly, roughly in order of
-payoff:
+The engine improvements live in separate branches so their effect on play
+can be observed in isolation — each branch's README carries its measured
+results, and the games against Claude make the differences tangible:
 
-* **Transposition table** — lets the same depth search far more cheaply, so
-  the exhaustive endgame phase starts earlier. Purely a speed win, no
-  knowledge needed.
-* **Threat-aware evaluation** — count open three-in-a-rows with a
-  playable-eventually fourth square, and weight them by row parity (odd
-  rows for the first player, even for the second). The classic Connect Four
-  heuristic from Victor Allis's thesis; it gives the engine the concept
-  directly instead of relying on search depth.
+* **`simple-engine`** — this version: the original Java evaluation and
+  plain negamax/alpha-beta with iterative deepening. Won its games through
+  tactics and the opponent's bookkeeping errors; lost to Claude once the
+  LLM hints removed those errors.
+* **`transposition-table`** — adds a transposition table, principal
+  variation search and MTD(f): ≈2× fewer nodes, depth 13–17 instead of
+  11–13 at the same 2 s budget, endgame proofs in milliseconds. Deviated
+  from the recorded losing line exactly where a 10 s analysis predicted —
+  and still lost to the same positional freeze, then resigned: depth alone
+  does not buy understanding.
+* **`threat-eval`** — adds the threat/parity evaluation (Allis): threats
+  weighted by row parity, only the lowest threat per column counts. At
+  depth 11–13 it plays a visibly constructive style — stacked win squares,
+  threats defending threats — and beat Claude twice.
+
+`main` currently matches `simple-engine`; the plan is to merge the
+improvement branches so `main` ends up with the strongest version while
+each step stays observable in its branch.

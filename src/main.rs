@@ -153,30 +153,16 @@ impl eframe::App for App {
                 heading
             };
             ui.heading(heading);
-            ui.label(format!(
-                "You: {}   Engine: {}",
-                if g.human == Piece::Red { "Red" } else { "Yellow" },
-                if g.engine() == Piece::Red { "Red" } else { "Yellow" },
-            ));
-            let line2 = if thinking {
-                format!(
-                    "searching depth {}  nodes {}",
-                    self.shared.stats.depth.load(Ordering::Relaxed),
-                    self.shared.stats.nodes.load(Ordering::Relaxed)
-                )
-            } else if let Some(ls) = &g.last_search {
-                format!(
-                    "last engine move: col {}  score {}  depth {}  nodes {}  {} ms ({:.1} Mnodes/s)",
-                    ls.col, ls.score, ls.depth, ls.nodes, ls.millis,
-                    ls.nodes as f64 / (ls.millis.max(1) as f64 * 1000.0)
-                )
-            } else {
-                String::new()
-            };
             ui.horizontal(|ui| {
-                ui.label(line2);
-                // Small eval bar, right-aligned: red's share of the last
-                // engine score (tanh-scaled, a proven win fills the bar).
+                ui.label(format!(
+                    "You: {}   Engine: {}",
+                    if g.human == Piece::Red { "Red" } else { "Yellow" },
+                    if g.engine() == Piece::Red { "Red" } else { "Yellow" },
+                ));
+                // Small eval bar, right-aligned on this short line so it
+                // never truncates the search-stats line below: red's share
+                // of the last engine score (tanh-scaled, a proven win fills
+                // the bar).
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let (bar, _) = ui.allocate_exact_size(egui::vec2(140.0, 12.0), egui::Sense::hover());
                     let red_score = g.last_search.as_ref().map_or(0.0, |ls| {
@@ -199,6 +185,22 @@ impl eframe::App for App {
                     p.rect_stroke(bar, 3.0, egui::Stroke::new(1.0, egui::Color32::from_gray(90)), egui::StrokeKind::Outside);
                 });
             });
+            let line2 = if thinking {
+                format!(
+                    "searching depth {}  nodes {}",
+                    self.shared.stats.depth.load(Ordering::Relaxed),
+                    self.shared.stats.nodes.load(Ordering::Relaxed)
+                )
+            } else if let Some(ls) = &g.last_search {
+                format!(
+                    "last engine move: col {}  score {}  depth {}  nodes {}  {} ms ({:.1} Mnodes/s)",
+                    ls.col, ls.score, ls.depth, ls.nodes, ls.millis,
+                    ls.nodes as f64 / (ls.millis.max(1) as f64 * 1000.0)
+                )
+            } else {
+                String::new()
+            };
+            ui.label(line2);
             ui.add_space(4.0);
 
             // Settings strip: the keyboard shortcuts stay available, this is
