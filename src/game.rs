@@ -131,8 +131,8 @@ impl Game {
 
     pub fn message(&self) -> String {
         match self.status {
-            Status::HumanToMove if self.engine_sees_win() => "Engine sees a forced win! Your move (keys 1-7)".into(),
-            Status::HumanToMove => "Your move (keys 1-7)".into(),
+            Status::HumanToMove if self.engine_sees_win() => "Engine sees a forced win! Your move".into(),
+            Status::HumanToMove => "Your move".into(),
             Status::Thinking => "Engine is thinking ...".into(),
             Status::Won(WinnerJs::Human) if self.resigned => "Engine gives up - it is facing a forced loss. You win!".into(),
             Status::Won(WinnerJs::Human) => "You win!".into(),
