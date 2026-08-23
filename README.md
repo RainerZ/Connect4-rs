@@ -64,7 +64,8 @@ src/
   after it resolves (a square both sides threaten goes to the side whose
   parity matches). Also incremental: threat transitions are detected from
   the line values already computed, so the hot path pays two extra
-  compares (~13 Mn/s vs ~17 before).
+  compares (~13 Mn/s alone, ~11 Mn/s combined with the transposition
+  table, vs ~17 for the bare evaluation).
 * Negamax with alpha/beta, column order 4,5,3,2,6,1,7 (centre first),
   principal variation search (first child full window, siblings zero
   window with re-search).
