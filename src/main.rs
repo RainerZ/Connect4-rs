@@ -143,11 +143,9 @@ impl eframe::App for App {
             };
             ui.heading(heading);
             let mut info = format!(
-                "You: {}   Engine: {}   Think time: {} s (+/-)   Hints: {} (H)   Keys: 1-7 or click, N new game, S swap starter",
+                "You: {}   Engine: {}",
                 if g.human == Piece::Red { "Red" } else { "Yellow" },
                 if g.engine() == Piece::Red { "Red" } else { "Yellow" },
-                g.budget.as_secs_f64(),
-                if g.hints { "on" } else { "off" }
             );
             if thinking {
                 info += &format!(
