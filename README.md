@@ -135,7 +135,11 @@ Unit tests in `engine.rs` check the line tables, that the incremental score
 matches a full-scan reference port of the Java evaluation over random
 playouts, that the search finds immediate wins and blocks, and that a real
 zugzwang endgame is proven within the budget; `hints.rs` tests the
-win/block/losing-move detection.
+win/block/losing-move detection. A slower test (~7 s) replays the recorded
+lost game and shows that up to 10 s of think time would not have saved the
+engine: at ply 18 it still picks the recorded move without seeing the loss,
+at ply 20 the loss is proven. An ignored `analyse_recorded_win` helper
+prints the 10 s evaluation of every engine move of that game.
 
 Search benchmark (ignored by default, prints depth reached and nodes/s for
 a 0.5 s and a 2 s budget):

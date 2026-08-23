@@ -511,6 +511,41 @@ mod tests {
         assert_eq!(r.col, Some(0)); // must block
     }
 
+    /// The recorded game the engine lost to Claude (red, with hints; see
+    /// README "Results"). Red wins with 2-3-4-5 on row 3.
+    pub const RECORDED_LOSS: [usize; 39] = [4, 4, 4, 4, 5, 6, 3, 2, 5, 4, 5, 5, 5, 4, 1, 5, 3, 1, 3, 3, 6, 6, 6, 7, 7, 1, 1, 1, 7, 1, 7, 7, 7, 6, 6, 3, 3, 2, 2];
+
+    fn replay(moves: &[usize]) -> Board {
+        let mut b = Board::new();
+        let mut p = Piece::Red;
+        for &c in moves {
+            b.make(c - 1, p);
+            p = p.other();
+        }
+        b
+    }
+
+    /// Would more think time have saved the engine in the recorded loss?
+    /// Answer (checked here): no, up to the 10 s limit. At ply 18 a 10 s
+    /// search still picks the recorded move with a healthy score - the loss
+    /// is beyond its horizon - and at ply 20 the loss is already proven, so
+    /// there is no later escape either. (A 10 s search does deviate from the
+    /// recorded line at ply 16, but out of preference, not because it sees
+    /// the loss: one ply later it happily rejoins the losing line.)
+    #[test]
+    fn more_think_time_does_not_save_recorded_loss() {
+        let budget = Duration::from_secs(10);
+        let stats = SearchStats::default();
+        assert!(replay(&RECORDED_LOSS).has_won(Piece::Red));
+        // Before the recorded ply 18 (yellow to move): same move, no alarm.
+        let r = Searcher::best_move(&replay(&RECORDED_LOSS[..17]), Piece::Yellow, budget, &stats);
+        assert_eq!(r.col, Some(RECORDED_LOSS[17] - 1), "10 s search deviates at ply 18 after all (depth {})", r.depth);
+        assert!(r.score > -WIN_SCORE, "10 s search saw the loss at ply 18 (score {} depth {})", r.score, r.depth);
+        // Before the recorded ply 20: the loss is proven within 10 s.
+        let r = Searcher::best_move(&replay(&RECORDED_LOSS[..19]), Piece::Yellow, budget, &stats);
+        assert_eq!(r.score, -WIN_SCORE, "loss not proven at ply 20 (score {} depth {})", r.score, r.depth);
+    }
+
     /// Endgame from a real game (16 empties, red to move and lost by
     /// zugzwang): iterative deepening must reach the proven result in budget.
     #[test]
@@ -533,6 +568,29 @@ mod tests {
 #[cfg(test)]
 mod bench {
     use super::*;
+
+    /// Analysis helper: replay the recorded winning game and search every
+    /// engine-to-move position with a 10 s budget.
+    #[test]
+    #[ignore]
+    fn analyse_recorded_win() {
+        let stats = SearchStats::default();
+        let mut b = Board::new();
+        let mut p = Piece::Red;
+        for (i, &c) in tests::RECORDED_LOSS.iter().enumerate() {
+            if p == Piece::Yellow {
+                let t = std::time::Instant::now();
+                let r = Searcher::best_move(&b, Piece::Yellow, std::time::Duration::from_secs(10), &stats);
+                eprintln!(
+                    "ply {:2} yellow to move: 10s search depth {:2} score {:5} col {:?} (recorded {})  [{} ms]",
+                    i + 1, r.depth, r.score, r.col.map(|c| c + 1), c, t.elapsed().as_millis()
+                );
+            }
+            b.make(c - 1, p);
+            p = p.other();
+        }
+        assert!(b.has_won(Piece::Red));
+    }
     #[test]
     #[ignore]
     fn bench_search() {
