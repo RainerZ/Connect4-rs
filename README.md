@@ -246,7 +246,8 @@ commands above.
 
 ### Results so far
 
-Claude (Fable 5) vs. the engine: **engine 3 – Claude 1**.
+Claude (Fable 5) vs. the engine: **engine 5 – Claude 2** (this branch's
+threat-aware engine: 2 – 0).
 
 Without hints, Claude lost all three games — twice at fixed depth 10 (a
 parity/zugzwang squeeze in 34 plies; a diagonal + vertical double threat in
@@ -277,6 +278,22 @@ Protocol of the win (columns 1–7; `Rc`/`Yc` = red/yellow drop in column c):
 The hints did exactly what they were built for: they caught the two forced
 blocks and kept the column heights straight, while the strategy (the c5r5
 prophylaxis, freezing column 2, the tempo fight) was the model's own.
+(The second Claude win was against the engine of the `transposition-table`
+branch, which deviated from the recorded line exactly where a 10 s analysis
+predicted but lost to the same column-2 freeze and resigned after 19 plies.)
+
+The threat-aware engine of this branch then beat Claude twice, playing a
+visibly different, constructive style at only depth 11–13: in game one it
+stacked two win squares in one column (c5r3 diagonal under c5r4 row) so no
+single block answered; in the rematch Claude avoided every earlier mistake
+- reversed a trap so the engine had to block with a useless stone, killed
+three lines with one prophylactic move - and still lost to a row-5 trio
+whose completion squares were protected by an older diagonal underneath:
+threats defending threats. Where the original evaluation won on tactics
+and Claude's bookkeeping errors, the threat evaluation builds winning
+structures on its own - and its optimism tracked real advantages instead
+of preceding losses. Next experiment: merge this evaluation with the
+`transposition-table` branch's deeper search.
 
 
 ### Ideas for the engine
