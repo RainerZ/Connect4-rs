@@ -48,8 +48,12 @@ pub struct Game {
     /// Think time per move (iterative deepening budget).
     pub budget: Duration,
     pub engine_starts: bool,
-    /// LLM assistance (see hints.rs): include tactical hints in the JSON state.
+    /// LLM assistance (see hints.rs): include tactical hints in the JSON
+    /// state served to socket/MCP clients.
     pub hints: bool,
+    /// Show the hint rings in the GUI. Independent of `hints`, so a human
+    /// can watch the rings while a model plays unaided - and vice versa.
+    pub show_hints: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -80,7 +84,7 @@ pub struct StateJson {
 }
 
 impl Game {
-    pub fn new(engine_starts: bool, budget: Duration, hints: bool) -> Game {
+    pub fn new(engine_starts: bool, budget: Duration, hints: bool, show_hints: bool) -> Game {
         let human = if engine_starts { Piece::Yellow } else { Piece::Red };
         Game {
             board: Board::new(),
@@ -93,6 +97,7 @@ impl Game {
             budget,
             engine_starts,
             hints,
+            show_hints,
         }
     }
 
@@ -208,7 +213,7 @@ pub struct Shared {
 impl Shared {
     pub fn new(engine_starts: bool, budget: Duration, hints: bool) -> Arc<Shared> {
         Arc::new(Shared {
-            game: Mutex::new(Game::new(engine_starts, budget, hints)),
+            game: Mutex::new(Game::new(engine_starts, budget, hints, hints)),
             changed: Condvar::new(),
             stats: SearchStats::default(),
             repaint: Mutex::new(None),
@@ -272,7 +277,7 @@ mod tests {
     use crate::engine::WIN_SCORE;
 
     fn replay(cols: &[usize]) -> Game {
-        let mut g = Game::new(false, Duration::from_secs(2), false);
+        let mut g = Game::new(false, Duration::from_secs(2), false, false);
         for &c in cols {
             let p = g.to_move;
             g.board.make(c - 1, p);

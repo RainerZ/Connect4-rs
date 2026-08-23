@@ -98,7 +98,7 @@ impl eframe::App for App {
         let ctx = ui.ctx().clone();
         let ctx = &ctx;
         // Keyboard: 1-7 drop piece, N / Space new game, S swap who starts + new game,
-        // +/- double/halve the think time, H toggle LLM hints
+        // +/- double/halve the think time, H toggle the hint rings (GUI only)
         let mut changed = false;
         ctx.input(|i| {
             let mut g = self.shared.game.lock().unwrap();
@@ -108,13 +108,13 @@ impl eframe::App for App {
                 }
             }
             if i.key_pressed(egui::Key::N) || i.key_pressed(egui::Key::Space) {
-                let (es, bud, h) = (g.engine_starts, g.budget, g.hints);
-                *g = game::Game::new(es, bud, h);
+                let (es, bud, h, sh) = (g.engine_starts, g.budget, g.hints, g.show_hints);
+                *g = game::Game::new(es, bud, h, sh);
                 changed = true;
             }
             if i.key_pressed(egui::Key::S) {
-                let (es, bud, h) = (!g.engine_starts, g.budget, g.hints);
-                *g = game::Game::new(es, bud, h);
+                let (es, bud, h, sh) = (!g.engine_starts, g.budget, g.hints, g.show_hints);
+                *g = game::Game::new(es, bud, h, sh);
                 changed = true;
             }
             if i.key_pressed(egui::Key::Plus) || i.key_pressed(egui::Key::Equals) {
@@ -124,7 +124,7 @@ impl eframe::App for App {
                 g.budget = (g.budget / 2).max(Duration::from_millis(50));
             }
             if i.key_pressed(egui::Key::H) {
-                g.hints = !g.hints;
+                g.show_hints = !g.show_hints;
             }
         });
 
@@ -207,16 +207,20 @@ impl eframe::App for App {
             // the discoverable way to reach the same things.
             ui.horizontal(|ui| {
                 if ui.button("New game").clicked() {
-                    let (es, bud, h) = (g.engine_starts, g.budget, g.hints);
-                    *g = game::Game::new(es, bud, h);
+                    let (es, bud, h, sh) = (g.engine_starts, g.budget, g.hints, g.show_hints);
+                    *g = game::Game::new(es, bud, h, sh);
                     changed = true;
                 }
                 let mut es = g.engine_starts;
                 if ui.checkbox(&mut es, "Engine starts").on_hover_text("Applies to the next new game").changed() {
                     g.engine_starts = es;
                 }
+                let mut sh = g.show_hints;
+                if ui.checkbox(&mut sh, "Hint rings").on_hover_text("GUI overlay only (H)").changed() {
+                    g.show_hints = sh;
+                }
                 let mut h = g.hints;
-                if ui.checkbox(&mut h, "Hints").changed() {
+                if ui.checkbox(&mut h, "LLM hints").on_hover_text("Tactical hints in the socket/MCP state").changed() {
                     g.hints = h;
                 }
                 let mut secs = g.budget.as_secs_f64();
@@ -316,7 +320,7 @@ impl eframe::App for App {
             // Hint overlay (H): ring on the landing slot of tactically
             // decisive columns - green: wins now, orange: must block,
             // grey + x: loses at once.
-            if g.hints && g.status == Status::HumanToMove {
+            if g.show_hints && g.status == Status::HumanToMove {
                 let h = hints::compute(&g.board, g.to_move);
                 let ring = |col1: usize, color: egui::Color32, cross: bool| {
                     let c = col1 - 1;

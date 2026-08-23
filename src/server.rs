@@ -62,7 +62,7 @@ fn execute(shared: &Shared, req: &Value) -> Value {
         Some("new") => {
             let es = req.get("engine_starts").and_then(Value::as_bool).unwrap_or(false);
             let mut g = shared.game.lock().unwrap();
-            *g = Game::new(es, g.budget, g.hints);
+            *g = Game::new(es, g.budget, g.hints, g.show_hints);
             drop(g);
             shared.notify();
             wait_engine(shared);
@@ -91,7 +91,7 @@ fn execute(shared: &Shared, req: &Value) -> Value {
             };
             let es = req.get("engine_starts").and_then(Value::as_bool).unwrap_or(false);
             let mut g = shared.game.lock().unwrap();
-            let mut ng = Game::new(es, g.budget, g.hints);
+            let mut ng = Game::new(es, g.budget, g.hints, g.show_hints);
             for (i, &c) in moves.iter().enumerate() {
                 if !ng.replay_move(c) {
                     return json!({"error": format!("illegal replay move {} (col {})", i + 1, c + 1), "state": ng.to_json()});

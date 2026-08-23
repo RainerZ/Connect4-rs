@@ -97,9 +97,11 @@ in `message`.
 
 Play with the mouse (hover shows a translucent ghost on the landing slot,
 click drops the piece; pieces fall with a short gravity animation) or the
-keyboard. With hints on, the landing slots of tactically decisive columns
-are marked: green ring = wins now, orange ring = must block, grey ring with
-an x = loses immediately.
+keyboard. With the hint rings on, the landing slots of tactically decisive
+columns are marked: green ring = wins now, orange ring = must block, grey
+ring with an x = loses immediately. The rings are a GUI-only display and
+independent of the LLM hints in the socket/MCP state, so you can watch the
+rings while a model plays unaided (and vice versa); both default to on.
 
 A settings strip offers a New-game button, an "engine starts" checkbox
 (applies to the next game), the hints toggle and a logarithmic think-time
@@ -108,7 +110,8 @@ of the engine's last score: middle = balanced, full = proven win.
 
 Keys: `1`–`7` drop a piece, `N`/`Space` new game, `S` swap who starts (and
 start a new game), `+`/`-` double/halve the engine's think time, `H` toggle
-hints (see below). The status line shows think time and hint state; while
+the hint rings (GUI only; the LLM hints have their own checkbox and socket
+command, see below). The status line shows think time and hint state; while
 the engine thinks it shows the iteration depth and live node count,
 afterwards score, depth, nodes and time of the last search.
 
@@ -146,9 +149,11 @@ To separate the two, the state can carry one-ply tactical hints:
 * `losing_moves` — columns after which the opponent has an immediate win
 
 This is **assistance for the client only**; the engine never sees it. On by
-default; toggle with `H` in the GUI, `--no-hints` at startup,
-`{"cmd":"hints","on":…}` on the socket or the `connect4_hints` MCP tool, and
-compare a model's results with and without.
+default; toggle with the "LLM hints" checkbox in the GUI, `--no-hints` at
+startup, `{"cmd":"hints","on":…}` on the socket or the `connect4_hints` MCP
+tool, and compare a model's results with and without. The GUI's hint rings
+are a separate, display-only flag (`H` key / "Hint rings" checkbox), so
+turning the rings off never changes what a model sees.
 
 ### MCP server (`src/mcp.rs`)
 
