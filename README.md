@@ -350,8 +350,9 @@ results, and the games against Claude make the differences tangible:
   depth 11–13 it plays a visibly constructive style — stacked win squares,
   threats defending threats — and beat Claude twice.
 
-* **`combined-engine`** — this branch: both improvements merged, the
-  threat/parity evaluation searched at transposition-table depth.
+* **`combined-engine`** — both improvements merged, the threat/parity
+  evaluation searched at transposition-table depth. This is what `main`
+  now carries.
 
 Measured on the recorded lost game, the two improvements attack the same
 blindness from opposite sides: the deeper search deviates from the losing
@@ -359,5 +360,5 @@ line where a 10 s analysis predicted but still cannot prove the loss at
 ply 18, while the threat evaluation turns negative from ply 12 on
 (−18/−9/−28/−16 instead of +4…+13) — it senses the frozen-column
 structure plies before it is provable. Each branch README carries the
-detailed numbers; `main` is planned to receive the strongest version
-while each step stays observable in its branch.
+detailed numbers; `main` carries the strongest (combined) version while
+each step stays observable in its branch.
