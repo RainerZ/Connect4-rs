@@ -6,9 +6,9 @@ mod server;
 use eframe::egui;
 use engine::{Piece, COLS, ROWS};
 use game::{Shared, Status, DEFAULT_BUDGET};
-use std::time::Duration;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 /// Usage: connect4-rs [--budget <seconds>] [--no-hints]
 fn parse_args() -> (Duration, bool) {
@@ -62,12 +62,35 @@ fn main() -> eframe::Result {
     };
     eframe::run_native("Connect4-rs", options, Box::new(|cc| {
         *shared.repaint.lock().unwrap() = Some(cc.egui_ctx.clone());
-        Ok(Box::new(App { shared }))
+        Ok(Box::new(App { shared, seen_moves: 0, anim: None }))
     }))
+}
+
+/// A piece falling into its slot.
+struct Anim {
+    col: usize,
+    row: usize,
+    piece: Piece,
+    start: Instant,
+    duration: Duration,
 }
 
 struct App {
     shared: Arc<Shared>,
+    /// Number of moves already shown (to detect new moves to animate).
+    seen_moves: usize,
+    anim: Option<Anim>,
+}
+
+const RED: egui::Color32 = egui::Color32::from_rgb(220, 40, 40);
+const YELLOW: egui::Color32 = egui::Color32::from_rgb(240, 210, 30);
+const HOLE: egui::Color32 = egui::Color32::WHITE;
+
+fn piece_color(p: Piece) -> egui::Color32 {
+    match p {
+        Piece::Red => RED,
+        Piece::Yellow => YELLOW,
+    }
 }
 
 impl eframe::App for App {
@@ -104,11 +127,8 @@ impl eframe::App for App {
                 g.hints = !g.hints;
             }
         });
-        if changed {
-            self.shared.notify();
-        }
 
-        let g = self.shared.game.lock().unwrap();
+        let mut g = self.shared.game.lock().unwrap();
         let thinking = g.status == Status::Thinking;
         {
             // Headline, coloured when something special is going on: red for
@@ -123,7 +143,7 @@ impl eframe::App for App {
             };
             ui.heading(heading);
             let mut info = format!(
-                "You: {}   Engine: {}   Think time: {} s (+/-)   LLM hints: {} (H)   Keys: 1-7 move, N new game, S swap starter",
+                "You: {}   Engine: {}   Think time: {} s (+/-)   Hints: {} (H)   Keys: 1-7 or click, N new game, S swap starter",
                 if g.human == Piece::Red { "Red" } else { "Yellow" },
                 if g.engine() == Piece::Red { "Red" } else { "Yellow" },
                 g.budget.as_secs_f64(),
@@ -147,29 +167,121 @@ impl eframe::App for App {
 
             let avail = ui.available_size();
             let cell = (avail.x / COLS as f32).min(avail.y / ROWS as f32).min(90.0);
-            let (rect, _) = ui.allocate_exact_size(egui::vec2(cell * COLS as f32, cell * ROWS as f32), egui::Sense::hover());
+            let (rect, resp) =
+                ui.allocate_exact_size(egui::vec2(cell * COLS as f32, cell * ROWS as f32), egui::Sense::click());
+            let center_of = |c: usize, r: usize| {
+                egui::pos2(rect.min.x + (c as f32 + 0.5) * cell, rect.max.y - (r as f32 + 0.5) * cell)
+            };
+
+            // Mouse: hovered column, click to drop.
+            let hover_col = resp.hover_pos().map(|p| (((p.x - rect.min.x) / cell) as usize).min(COLS - 1));
+            if resp.clicked()
+                && let Some(c) = hover_col
+                && g.human_move(c)
+            {
+                changed = true;
+            }
+
+            // Detect new moves and start the falling animation for the latest.
+            if g.history.len() < self.seen_moves {
+                self.seen_moves = g.history.len(); // new game
+                self.anim = None;
+            } else if g.history.len() > self.seen_moves {
+                self.seen_moves = g.history.len();
+                if let Some(&col) = g.history.last() {
+                    let row = g.board.height(col) - 1;
+                    let piece = g.board.get(col, row).unwrap();
+                    let fall_rows = (ROWS - row) as f32;
+                    self.anim = Some(Anim {
+                        col,
+                        row,
+                        piece,
+                        start: Instant::now(),
+                        duration: Duration::from_secs_f32(0.10 * fall_rows.sqrt().max(1.0)),
+                    });
+                }
+            }
+            let anim_cell = match &self.anim {
+                Some(a) if a.start.elapsed() < a.duration => Some((a.col, a.row)),
+                Some(_) => {
+                    self.anim = None;
+                    None
+                }
+                None => None,
+            };
+
             let painter = ui.painter();
             painter.rect_filled(rect, 6.0, egui::Color32::from_rgb(30, 60, 160));
             let win = g.board.winning_line();
             for c in 0..COLS {
                 for r in 0..ROWS {
-                    let center = egui::pos2(rect.min.x + (c as f32 + 0.5) * cell, rect.max.y - (r as f32 + 0.5) * cell);
                     let color = match g.board.get(c, r) {
-                        Some(Piece::Red) => egui::Color32::from_rgb(220, 40, 40),
-                        Some(Piece::Yellow) => egui::Color32::from_rgb(240, 210, 30),
-                        None => egui::Color32::WHITE,
+                        _ if anim_cell == Some((c, r)) => HOLE, // still falling
+                        Some(p) => piece_color(p),
+                        None => HOLE,
                     };
-                    painter.circle_filled(center, cell * 0.42, color);
-                    if win.map_or(false, |w| w.contains(&(c, r))) {
-                        painter.circle_stroke(center, cell * 0.42, egui::Stroke::new(4.0, egui::Color32::BLACK));
+                    painter.circle_filled(center_of(c, r), cell * 0.42, color);
+                    if anim_cell != Some((c, r)) && win.map_or(false, |w| w.contains(&(c, r))) {
+                        painter.circle_stroke(center_of(c, r), cell * 0.42, egui::Stroke::new(4.0, egui::Color32::BLACK));
                     }
                 }
             }
+
+            // Falling piece: accelerate from the top row to the target slot.
+            if let Some(a) = &self.anim {
+                let p = (a.start.elapsed().as_secs_f32() / a.duration.as_secs_f32()).min(1.0);
+                let y0 = center_of(a.col, ROWS - 1).y;
+                let y1 = center_of(a.col, a.row).y;
+                let y = y0 + (y1 - y0) * p * p; // gravity
+                painter.circle_filled(egui::pos2(center_of(a.col, 0).x, y), cell * 0.42, piece_color(a.piece));
+            }
+
+            // Hover ghost: translucent piece on the landing slot.
+            if g.status == Status::HumanToMove
+                && self.anim.is_none()
+                && let Some(c) = hover_col
+                && g.board.can_play(c)
+            {
+                let ghost = piece_color(g.human).gamma_multiply(0.45);
+                painter.circle_filled(center_of(c, g.board.height(c)), cell * 0.42, ghost);
+            }
+
+            // Hint overlay (H): ring on the landing slot of tactically
+            // decisive columns - green: wins now, orange: must block,
+            // grey + x: loses at once.
+            if g.hints && g.status == Status::HumanToMove {
+                let h = hints::compute(&g.board, g.to_move);
+                let ring = |col1: usize, color: egui::Color32, cross: bool| {
+                    let c = col1 - 1;
+                    let center = center_of(c, g.board.height(c));
+                    painter.circle_stroke(center, cell * 0.34, egui::Stroke::new(4.0, color));
+                    if cross {
+                        let d = cell * 0.16;
+                        for s in [-1.0f32, 1.0] {
+                            painter.line_segment(
+                                [egui::pos2(center.x - d, center.y - s * d), egui::pos2(center.x + d, center.y + s * d)],
+                                egui::Stroke::new(4.0, color),
+                            );
+                        }
+                    }
+                };
+                for &c in &h.losing_moves {
+                    ring(c, egui::Color32::from_rgb(130, 130, 130), true);
+                }
+                for &c in &h.must_block {
+                    ring(c, egui::Color32::from_rgb(250, 150, 30), false);
+                }
+                for &c in &h.winning_moves {
+                    ring(c, egui::Color32::from_rgb(40, 200, 70), false);
+                }
+            }
+
             // last move marker
-            if let Some(&c) = g.history.last() {
+            if self.anim.is_none()
+                && let Some(&c) = g.history.last()
+            {
                 let r = g.board.height(c) - 1;
-                let center = egui::pos2(rect.min.x + (c as f32 + 0.5) * cell, rect.max.y - (r as f32 + 0.5) * cell);
-                painter.circle_filled(center, cell * 0.08, egui::Color32::BLACK);
+                painter.circle_filled(center_of(c, r), cell * 0.08, egui::Color32::BLACK);
             }
             // column numbers
             for c in 0..COLS {
@@ -182,8 +294,14 @@ impl eframe::App for App {
                 );
             }
         }
-        if thinking {
-            ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        drop(g);
+        if changed {
+            self.shared.notify();
+        }
+        if self.anim.is_some() {
+            ctx.request_repaint();
+        } else if thinking {
+            ctx.request_repaint_after(Duration::from_millis(100));
         }
     }
 }

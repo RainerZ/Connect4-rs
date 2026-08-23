@@ -44,12 +44,17 @@ it proves its own loss it resigns ("Engine gives up") rather than playing
 out the zugzwang. The socket/MCP state carries this as `resigned: true` and
 in `message`.
 
+Play with the mouse (hover shows a translucent ghost on the landing slot,
+click drops the piece; pieces fall with a short gravity animation) or the
+keyboard. With hints on, the landing slots of tactically decisive columns
+are marked: green ring = wins now, orange ring = must block, grey ring with
+an x = loses immediately.
+
 Keys: `1`–`7` drop a piece, `N`/`Space` new game, `S` swap who starts (and
 start a new game), `+`/`-` double/halve the engine's think time, `H` toggle
-LLM hints (see below). The status line shows think time and hint state;
-while the engine thinks it shows the
-iteration depth and live node count, afterwards score, depth, nodes and time
-of the last search.
+hints (see below). The status line shows think time and hint state; while
+the engine thinks it shows the iteration depth and live node count,
+afterwards score, depth, nodes and time of the last search.
 
 ```bash
 cargo run --release -- --budget 5     # think time per engine move in seconds (default 2)
