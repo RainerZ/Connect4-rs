@@ -258,8 +258,9 @@ commands above.
 
 ### Results so far
 
-Claude (Fable 5) vs. the engine: **engine 5 – Claude 2** (the
-threat-aware engine: 2 – 0).
+Claude (Fable 5) vs. the engine: **engine 6 – Claude 2**. Every engine
+version won in its own characteristic way — which is what this repo is
+about.
 
 Without hints, Claude lost all three games — twice at fixed depth 10 (a
 parity/zugzwang squeeze in 34 plies; a diagonal + vertical double threat in
@@ -304,8 +305,17 @@ whose completion squares were protected by an older diagonal underneath:
 threats defending threats. Where the original evaluation won on tactics
 and Claude's bookkeeping errors, the threat evaluation builds winning
 structures on its own - and its optimism tracked real advantages instead
-of preceding losses. Next experiment: merge this evaluation with the
-`transposition-table` branch's deeper search.
+of preceding losses.
+
+The combined engine then won the showdown game with a third kind of win:
+an engineered zugzwang. It arranged its win squares *below* Claude's in
+both remaining open columns, sealed the parity with a quiet c1r1 - and
+announced the forced win at depth 15 the moment it did - then burned the
+neutral squares until Claude ran out of safe moves. That is exactly the
+strategy Claude had used to beat the simple engine in its first win,
+played back without hints and proven fifteen plies out: the threat
+evaluation supplied the structure, the transposition-table search the
+proof and the flawless execution.
 
 The win reproduces against the stronger engine of this branch
 (transposition table + PVS + MTD(f), depth 13-17 at the same 2 s budget):
