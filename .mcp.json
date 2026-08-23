@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "connect4": {
+      "command": "/Users/rainer/git/Connect4-rs/target/release/connect4-mcp"
+    }
+  }
+}
