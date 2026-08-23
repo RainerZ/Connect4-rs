@@ -38,6 +38,12 @@ src/
 
 ### GUI (`src/main.rs`)
 
+When the engine's search proves a win it says so ("Engine sees a forced
+win!", headline in red) instead of letting you walk into it unwarned; when
+it proves its own loss it resigns ("Engine gives up") rather than playing
+out the zugzwang. The socket/MCP state carries this as `resigned: true` and
+in `message`.
+
 Keys: `1`–`7` drop a piece, `N`/`Space` new game, `S` swap who starts (and
 start a new game), `+`/`-` double/halve the engine's think time, `H` toggle
 LLM hints (see below). The status line shows think time and hint state;

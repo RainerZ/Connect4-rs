@@ -19,6 +19,16 @@ pub enum Status {
     Draw,
 }
 
+/// Result of an engine search from the engine's point of view, used to
+/// decide between moving, announcing a forced win and resigning.
+pub struct EngineMove {
+    pub col: Option<usize>,
+    pub score: i32,
+    pub depth: usize,
+    pub nodes: u64,
+    pub millis: u128,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WinnerJs {
@@ -33,6 +43,8 @@ pub struct Game {
     pub status: Status,
     pub history: Vec<usize>,
     pub last_search: Option<LastSearch>,
+    /// The engine resigned because its search proved a loss.
+    pub resigned: bool,
     /// Think time per move (iterative deepening budget).
     pub budget: Duration,
     pub engine_starts: bool,
@@ -60,6 +72,8 @@ pub struct StateJson {
     pub history: Vec<usize>,
     pub last_search: Option<LastSearch>,
     pub message: String,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub resigned: bool,
     /// Only present when hints are enabled (LLM assistance, see hints.rs).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hints: Option<Hints>,
@@ -75,6 +89,7 @@ impl Game {
             status: if engine_starts { Status::Thinking } else { Status::HumanToMove },
             history: Vec::new(),
             last_search: None,
+            resigned: false,
             budget,
             engine_starts,
             hints,
@@ -108,13 +123,37 @@ impl Game {
         true
     }
 
+    /// The engine's last search proved a win for it (game still running).
+    pub fn engine_sees_win(&self) -> bool {
+        !matches!(self.status, Status::Won(_) | Status::Draw)
+            && self.last_search.as_ref().is_some_and(|ls| ls.score >= crate::engine::WIN_SCORE)
+    }
+
     pub fn message(&self) -> String {
         match self.status {
+            Status::HumanToMove if self.engine_sees_win() => "Engine sees a forced win! Your move (keys 1-7)".into(),
             Status::HumanToMove => "Your move (keys 1-7)".into(),
             Status::Thinking => "Engine is thinking ...".into(),
+            Status::Won(WinnerJs::Human) if self.resigned => "Engine gives up - it is facing a forced loss. You win!".into(),
             Status::Won(WinnerJs::Human) => "You win!".into(),
             Status::Won(WinnerJs::Engine) => "Engine wins!".into(),
             Status::Draw => "Draw".into(),
+        }
+    }
+
+    /// Apply a finished engine search: resign on a proven loss, otherwise
+    /// play the move. Factored out of the engine thread for testability.
+    pub fn apply_engine_result(&mut self, r: &EngineMove) {
+        if let Some(col) = r.col {
+            self.last_search = Some(LastSearch { col: col + 1, score: r.score, depth: r.depth, nodes: r.nodes, millis: r.millis });
+            if r.score <= -crate::engine::WIN_SCORE {
+                // Every line loses against best play: concede instead of
+                // playing on to the bitter end.
+                self.resigned = true;
+                self.status = Status::Won(WinnerJs::Human);
+            } else {
+                self.finish_move(col);
+            }
         }
     }
 
@@ -140,6 +179,7 @@ impl Game {
             history: self.history.iter().map(|c| c + 1).collect(),
             last_search: self.last_search.clone(),
             message: self.message(),
+            resigned: self.resigned,
             hints: if self.hints && self.status == Status::HumanToMove { Some(hints::compute(&self.board, self.to_move)) } else { None },
         }
     }
@@ -190,10 +230,7 @@ impl Shared {
             if g.status == Status::Thinking && g.board.bitboard(Piece::Red) == board.bitboard(Piece::Red)
                 && g.board.bitboard(Piece::Yellow) == board.bitboard(Piece::Yellow)
             {
-                if let Some(col) = r.col {
-                    g.last_search = Some(LastSearch { col: col + 1, score: r.score, depth: r.depth, nodes: r.nodes, millis });
-                    g.finish_move(col);
-                }
+                g.apply_engine_result(&EngineMove { col: r.col, score: r.score, depth: r.depth, nodes: r.nodes, millis });
             }
             drop(g);
             self.notify();
@@ -216,3 +253,52 @@ fn raise_thread_priority() {
 
 #[cfg(not(target_os = "macos"))]
 fn raise_thread_priority() {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::WIN_SCORE;
+
+    fn replay(cols: &[usize]) -> Game {
+        let mut g = Game::new(false, Duration::from_secs(2), false);
+        for &c in cols {
+            let p = g.to_move;
+            g.board.make(c - 1, p);
+            g.to_move = p.other();
+        }
+        g
+    }
+
+    /// The engine resigns on a proven loss and the human wins.
+    #[test]
+    fn engine_resigns_on_forced_loss() {
+        // Position after ply 19 of the first Claude win: yellow (engine) is
+        // proven lost.
+        let mut g = replay(&[4, 4, 4, 4, 5, 6, 3, 2, 5, 4, 5, 5, 5, 4, 1, 5, 3, 1, 3]);
+        g.status = Status::Thinking;
+        let stats = crate::engine::SearchStats::default();
+        let r = crate::engine::Searcher::best_move(&g.board, Piece::Yellow, Duration::from_secs(5), &stats);
+        assert_eq!(r.score, -WIN_SCORE);
+        g.apply_engine_result(&EngineMove { col: r.col, score: r.score, depth: r.depth, nodes: r.nodes, millis: 0 });
+        assert!(g.resigned);
+        assert_eq!(g.status, Status::Won(WinnerJs::Human));
+        assert!(g.message().contains("gives up"));
+    }
+
+    /// A proven engine win is announced while the game continues.
+    #[test]
+    fn forced_win_is_announced() {
+        // Game 1 endgame: red (human) to move is lost, i.e. the engine
+        // (yellow) has a forced win.
+        let mut g = replay(&[4, 4, 4, 4, 3, 2, 5, 6, 3, 4, 5, 4, 3, 3, 5, 5, 5, 5, 7, 7, 1, 1, 7, 3, 1, 3, 7]);
+        g.status = Status::Thinking;
+        let stats = crate::engine::SearchStats::default();
+        let r = crate::engine::Searcher::best_move(&g.board, Piece::Yellow, Duration::from_secs(5), &stats);
+        assert_eq!(r.score, WIN_SCORE);
+        g.apply_engine_result(&EngineMove { col: r.col, score: r.score, depth: r.depth, nodes: r.nodes, millis: 0 });
+        assert!(!g.resigned);
+        assert_eq!(g.status, Status::HumanToMove);
+        assert!(g.engine_sees_win());
+        assert!(g.message().contains("forced win"));
+    }
+}

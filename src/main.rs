@@ -111,7 +111,17 @@ impl eframe::App for App {
         let g = self.shared.game.lock().unwrap();
         let thinking = g.status == Status::Thinking;
         {
-            ui.heading(g.message());
+            // Headline, coloured when something special is going on: red for
+            // an announced forced engine win, green when the human has won.
+            let heading = egui::RichText::new(g.message());
+            let heading = if g.engine_sees_win() {
+                heading.color(egui::Color32::from_rgb(230, 70, 70))
+            } else if matches!(g.status, Status::Won(game::WinnerJs::Human)) {
+                heading.color(egui::Color32::from_rgb(60, 190, 90))
+            } else {
+                heading
+            };
+            ui.heading(heading);
             let mut info = format!(
                 "You: {}   Engine: {}   Think time: {} s (+/-)   LLM hints: {} (H)   Keys: 1-7 move, N new game, S swap starter",
                 if g.human == Piece::Red { "Red" } else { "Yellow" },
