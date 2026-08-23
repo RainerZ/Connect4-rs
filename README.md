@@ -1,9 +1,38 @@
 # Connect4-rs
 
-Rust port of [Connect4](https://github.com/RainerZ/Connect4) (Java/JavaFX):
-a Connect Four engine (negamax with alpha/beta pruning on bitboards), an
-egui desktop GUI, and an [MCP](https://modelcontextprotocol.io) server so any
-LLM agent can play against the engine while you watch.
+**A Connect Four engine in Rust — play it yourself, or let your favourite
+LLM try to beat it while you watch.**
+
+Bitboard engine searching ~20 million positions per second, a clean egui
+desktop GUI, and an [MCP](https://modelcontextprotocol.io) server that turns
+the running game into three tools any LLM agent can play with.
+
+<p align="center"><img src="docs/winning-board.png" alt="Claude's winning board against the engine" width="520"></p>
+
+*The board above is a historic moment: the first game Claude won against
+the engine — more on that [below](#results-so-far).*
+
+## Highlights
+
+* **Fast engine** — two `u64` bitboards, incrementally updated evaluation,
+  negamax with alpha/beta, iterative deepening on a time budget. Endgames
+  are searched to the end; proven wins are announced and hopeless positions
+  resigned.
+* **Human-friendly GUI** — click to drop (with a landing ghost), gravity
+  drop animation, tactical hint rings, eval bar, think-time slider.
+* **LLM-friendly interface** — a JSON control socket and an MCP server with
+  optional tactical hints, so language models can play full games against
+  the engine and you can watch live.
+
+## Quick start
+
+```bash
+cargo build --release
+cargo run --release          # you are red and start; the engine answers
+```
+
+Requires a Rust toolchain (edition 2024, i.e. Rust ≥ 1.85). Build in
+release mode — the engine is roughly 10× slower in debug.
 
 ```
 src/
@@ -14,6 +43,7 @@ src/
   main.rs     egui/eframe GUI            -> binary `connect4-rs`
   mcp.rs      MCP stdio server           -> binary `connect4-mcp`
 ```
+(both binaries land in `target/release/`)
 
 ## What's there
 
@@ -75,6 +105,7 @@ The GUI listens on `127.0.0.1:4444`, one JSON object per line:
 {"cmd":"move","col":4}             # 1..7, blocks until the engine has answered
 {"cmd":"new","engine_starts":false}
 {"cmd":"hints","on":true}          # toggle LLM hints, returns the state
+{"cmd":"replay","moves":[4,4,…]}   # replay a full game, both sides' columns
 ```
 
 Replies contain the board (`rows`, top row first, `R`/`Y`/`.`), `status`
@@ -113,18 +144,6 @@ that forwards four tools to the running GUI:
 Each result is a text rendering of the board (plus a `hints:` line when
 enabled) followed by the raw JSON state.
 
-## Build
-
-Requires a Rust toolchain (edition 2024, i.e. Rust ≥ 1.85).
-
-```bash
-cargo build --release
-```
-
-This produces `target/release/connect4-rs` (GUI) and
-`target/release/connect4-mcp` (MCP server). Build in release mode — the
-engine is roughly 10× slower in debug.
-
 ## Test
 
 ```bash
@@ -152,11 +171,8 @@ cargo test --release bench_search -- --ignored --nocapture
 
 ### Yourself, in the GUI
 
-```bash
-cargo run --release
-```
-
-You play red and move first; press `S` to let the engine start.
+`cargo run --release` — you play red and move first; use the settings strip
+or press `S` to let the engine start.
 
 ### From a script or shell
 
@@ -226,9 +242,9 @@ parity/zugzwang squeeze in 34 plies; a diagonal + vertical double threat in
 height and handing the engine a double diagonal). Every loss traced back to
 a bookkeeping error, not strategy — which is what motivated the hints.
 
-With hints on, Claude (red) beat the engine (2 s budget, depth 12–20):
-
-![Winning board: red wins, the GUI highlighting the c4r1-c1r4 diagonal](docs/winning-board.png)
+With hints on, Claude (red) beat the engine (2 s budget, depth 12–20) —
+that game's final position is the screenshot at the top of this page, with
+the winning line circled.
 
 Protocol of the win (columns 1–7; `Rc`/`Yc` = red/yellow drop in column c):
 
@@ -244,16 +260,23 @@ Protocol of the win (columns 1–7; `Rc`/`Yc` = red/yellow drop in column c):
 | 27–28 | R1 Y1 | red breaks yellow's column-1 vertical |
 | 29–34 | R7 Y1, R7 Y7, R7 Y6 | red's **column-7 vertical threat** forces yellow's block — the tempo gain that wins the zugzwang |
 | 35–38 | R6 Y3, R3 Y2 | red seals row 6, blocks c3r6; yellow is out of safe squares and must enter column 2 |
-| 39 | **R2** | c2r3 completes two fours at once: 2-3-4-5 on row 3 and the c4r1–c1r4 diagonal (highlighted in the screenshot) — red wins |
+| 39 | **R2** | c2r3 completes two fours at once: 2-3-4-5 on row 3 and the c4r1–c1r4 diagonal (circled in the screenshot at the top) — red wins |
 
 The hints did exactly what they were built for: they caught the two forced
 blocks and kept the column heights straight, while the strategy (the c5r5
 prophylaxis, freezing column 2, the tempo fight) was the model's own.
 
 
-### Notes
+### Ideas for the engine
 
-Ways the engine could be made to handle this knowingly, roughly in order of payoff:
+Ways the engine could handle such positions knowingly, roughly in order of
+payoff:
 
-Transposition table — lets the same depth search far more cheaply, so the exhaustive endgame phase starts earlier. Purely a speed win, no knowledge needed.
-Threat-aware evaluation — count open three-in-a-rows with a playable-eventually fourth square, and weight them by row parity (odd rows for red, even for yellow). This is the classic Connect Four heuristic from Victor Allis's thesis and gives the engine the concept directly instead of relying on search depth.
+* **Transposition table** — lets the same depth search far more cheaply, so
+  the exhaustive endgame phase starts earlier. Purely a speed win, no
+  knowledge needed.
+* **Threat-aware evaluation** — count open three-in-a-rows with a
+  playable-eventually fourth square, and weight them by row parity (odd
+  rows for the first player, even for the second). The classic Connect Four
+  heuristic from Victor Allis's thesis; it gives the engine the concept
+  directly instead of relying on search depth.

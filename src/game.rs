@@ -114,6 +114,17 @@ impl Game {
         }
     }
 
+    /// Replay move (0-based column) for whichever side is to move, engine
+    /// included - used by the control socket's replay command. Returns false
+    /// if the column is illegal or the game is over.
+    pub fn replay_move(&mut self, col: usize) -> bool {
+        if matches!(self.status, Status::Won(_) | Status::Draw) || !self.board.can_play(col) {
+            return false;
+        }
+        self.finish_move(col);
+        true
+    }
+
     /// Human move (0-based column). Returns false if illegal now.
     pub fn human_move(&mut self, col: usize) -> bool {
         if self.status != Status::HumanToMove || !self.board.can_play(col) {

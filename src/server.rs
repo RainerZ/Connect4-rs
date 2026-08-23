@@ -1,6 +1,7 @@
 //! Minimal control socket: one JSON object per line in, one JSON line out.
 //! {"cmd":"state"} | {"cmd":"move","col":1..7} | {"cmd":"new","engine_starts":bool}
 //! {"cmd":"hints","on":bool}   toggles LLM assistance (see hints.rs)
+//! {"cmd":"replay","moves":[..]} replays a full game (both sides) into place
 //! `move` blocks until the engine has answered (or the game ended).
 
 use crate::game::{Game, Shared, Status, PORT};
@@ -81,6 +82,27 @@ fn execute(shared: &Shared, req: &Value) -> Value {
             wait_engine(shared);
             json!(shared.game.lock().unwrap().to_json())
         }
+        Some("replay") => {
+            let moves: Vec<usize> = match req.get("moves").and_then(Value::as_array) {
+                Some(a) if a.iter().all(|m| m.as_u64().is_some_and(|m| (1..=7).contains(&m))) => {
+                    a.iter().map(|m| m.as_u64().unwrap() as usize - 1).collect()
+                }
+                _ => return json!({"error": "replay needs moves: array of columns 1..7"}),
+            };
+            let es = req.get("engine_starts").and_then(Value::as_bool).unwrap_or(false);
+            let mut g = shared.game.lock().unwrap();
+            let mut ng = Game::new(es, g.budget, g.hints);
+            for (i, &c) in moves.iter().enumerate() {
+                if !ng.replay_move(c) {
+                    return json!({"error": format!("illegal replay move {} (col {})", i + 1, c + 1), "state": ng.to_json()});
+                }
+            }
+            *g = ng;
+            drop(g);
+            shared.notify();
+            wait_engine(shared);
+            json!(shared.game.lock().unwrap().to_json())
+        }
         Some("hints") => {
             let mut g = shared.game.lock().unwrap();
             if let Some(on) = req.get("on").and_then(Value::as_bool) {
@@ -91,6 +113,6 @@ fn execute(shared: &Shared, req: &Value) -> Value {
             shared.notify();
             json!(j)
         }
-        _ => json!({"error": "unknown cmd, use state | move | new | hints"}),
+        _ => json!({"error": "unknown cmd, use state | move | new | hints | replay"}),
     }
 }
