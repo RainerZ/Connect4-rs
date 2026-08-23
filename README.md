@@ -248,7 +248,7 @@ commands above.
 
 ### Results so far
 
-Claude (Fable 5) vs. the engine: **engine 3 – Claude 1**.
+Claude (Fable 5) vs. the engine: **engine 3 – Claude 2**.
 
 Without hints, Claude lost all three games — twice at fixed depth 10 (a
 parity/zugzwang squeeze in 34 plies; a diagonal + vertical double threat in
@@ -279,6 +279,17 @@ Protocol of the win (columns 1–7; `Rc`/`Yc` = red/yellow drop in column c):
 The hints did exactly what they were built for: they caught the two forced
 blocks and kept the column heights straight, while the strategy (the c5r5
 prophylaxis, freezing column 2, the tempo fight) was the model's own.
+
+The win reproduces against the stronger engine of this branch
+(transposition table + PVS + MTD(f), depth 13-17 at the same 2 s budget):
+the deeper engine deviated from the recorded game exactly where the 10 s
+analysis predicted (c5r6 at ply 14 - then it transposed straight back -
+and c7r1 instead of the fatal c1r2 at ply 18), but the c3r3 freeze of
+column 2 wins against both tries. This time the engine proved its loss at
+depth 20 within 226 ms and resigned on the spot after 19 plies. The losing
+mistake therefore lies before ply 18; positionally understanding such
+frozen-column structures long before they are provable is what the
+threat-aware evaluation below is about.
 
 
 ### Ideas for the engine
