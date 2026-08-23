@@ -4,12 +4,43 @@ mod server;
 
 use eframe::egui;
 use engine::{Piece, COLS, ROWS};
-use game::{Shared, Status};
+use game::{Shared, Status, DEFAULT_BUDGET};
+use std::time::Duration;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
+/// Usage: connect4-rs [--budget <seconds>]   (think time per engine move, default 2)
+fn parse_args() -> Duration {
+    let mut budget = DEFAULT_BUDGET;
+    let mut args = std::env::args().skip(1);
+    while let Some(a) = args.next() {
+        match a.as_str() {
+            "--budget" | "-b" => {
+                let v = args.next().and_then(|v| v.parse::<f64>().ok()).filter(|v| *v > 0.0);
+                match v {
+                    Some(secs) => budget = Duration::from_secs_f64(secs),
+                    None => {
+                        eprintln!("--budget needs a positive number of seconds");
+                        std::process::exit(2);
+                    }
+                }
+            }
+            "-h" | "--help" => {
+                println!("usage: connect4-rs [--budget <seconds>]\n  --budget  think time per engine move (default {})", DEFAULT_BUDGET.as_secs_f64());
+                std::process::exit(0);
+            }
+            _ => {
+                eprintln!("unknown argument {a}");
+                std::process::exit(2);
+            }
+        }
+    }
+    budget
+}
+
 fn main() -> eframe::Result {
-    let shared = Shared::new(false);
+    let budget = parse_args();
+    let shared = Shared::new(false, budget);
     {
         let s = shared.clone();
         std::thread::Builder::new().name("engine".into()).stack_size(16 << 20).spawn(move || s.engine_loop()).unwrap();
@@ -36,7 +67,8 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         let ctx = &ctx;
-        // Keyboard: 1-7 drop piece, N / Space new game, S swap who starts + new game
+        // Keyboard: 1-7 drop piece, N / Space new game, S swap who starts + new game,
+        // +/- double/halve the think time
         let mut changed = false;
         ctx.input(|i| {
             let mut g = self.shared.game.lock().unwrap();
@@ -46,14 +78,20 @@ impl eframe::App for App {
                 }
             }
             if i.key_pressed(egui::Key::N) || i.key_pressed(egui::Key::Space) {
-                let es = g.engine_starts;
-                *g = game::Game::new(es);
+                let (es, bud) = (g.engine_starts, g.budget);
+                *g = game::Game::new(es, bud);
                 changed = true;
             }
             if i.key_pressed(egui::Key::S) {
-                let es = !g.engine_starts;
-                *g = game::Game::new(es);
+                let (es, bud) = (!g.engine_starts, g.budget);
+                *g = game::Game::new(es, bud);
                 changed = true;
+            }
+            if i.key_pressed(egui::Key::Plus) || i.key_pressed(egui::Key::Equals) {
+                g.budget = (g.budget * 2).min(Duration::from_secs(60));
+            }
+            if i.key_pressed(egui::Key::Minus) {
+                g.budget = (g.budget / 2).max(Duration::from_millis(50));
             }
         });
         if changed {
@@ -65,10 +103,10 @@ impl eframe::App for App {
         {
             ui.heading(g.message());
             let mut info = format!(
-                "You: {}   Engine: {}   Depth: {}   Keys: 1-7 move, N new game, S swap starter",
+                "You: {}   Engine: {}   Think time: {} s (+/-)   Keys: 1-7 move, N new game, S swap starter",
                 if g.human == Piece::Red { "Red" } else { "Yellow" },
                 if g.engine() == Piece::Red { "Red" } else { "Yellow" },
-                g.depth
+                g.budget.as_secs_f64()
             );
             if thinking {
                 info += &format!(

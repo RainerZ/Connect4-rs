@@ -3,9 +3,10 @@
 use crate::engine::{Board, Piece, SearchStats, Searcher, COLS, ROWS};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Condvar, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-pub const DEFAULT_DEPTH: usize = 10;
+/// Default think time per engine move.
+pub const DEFAULT_BUDGET: Duration = Duration::from_secs(2);
 pub const PORT: u16 = 4444;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -31,7 +32,8 @@ pub struct Game {
     pub status: Status,
     pub history: Vec<usize>,
     pub last_search: Option<LastSearch>,
-    pub depth: usize,
+    /// Think time per move (iterative deepening budget).
+    pub budget: Duration,
     pub engine_starts: bool,
 }
 
@@ -58,7 +60,7 @@ pub struct StateJson {
 }
 
 impl Game {
-    pub fn new(engine_starts: bool) -> Game {
+    pub fn new(engine_starts: bool, budget: Duration) -> Game {
         let human = if engine_starts { Piece::Yellow } else { Piece::Red };
         Game {
             board: Board::new(),
@@ -67,7 +69,7 @@ impl Game {
             status: if engine_starts { Status::Thinking } else { Status::HumanToMove },
             history: Vec::new(),
             last_search: None,
-            depth: DEFAULT_DEPTH,
+            budget,
             engine_starts,
         }
     }
@@ -145,9 +147,9 @@ pub struct Shared {
 }
 
 impl Shared {
-    pub fn new(engine_starts: bool) -> Arc<Shared> {
+    pub fn new(engine_starts: bool, budget: Duration) -> Arc<Shared> {
         Arc::new(Shared {
-            game: Mutex::new(Game::new(engine_starts)),
+            game: Mutex::new(Game::new(engine_starts, budget)),
             changed: Condvar::new(),
             stats: SearchStats::default(),
             repaint: Mutex::new(None),
@@ -165,15 +167,15 @@ impl Shared {
     pub fn engine_loop(self: Arc<Self>) {
         raise_thread_priority();
         loop {
-            let (board, p, depth) = {
+            let (board, p, budget) = {
                 let mut g = self.game.lock().unwrap();
                 while g.status != Status::Thinking {
                     g = self.changed.wait(g).unwrap();
                 }
-                (g.board, g.engine(), g.depth)
+                (g.board, g.engine(), g.budget)
             };
             let t0 = Instant::now();
-            let r = Searcher::best_move(&board, p, depth, &self.stats);
+            let r = Searcher::best_move(&board, p, budget, &self.stats);
             let millis = t0.elapsed().as_millis();
             let mut g = self.game.lock().unwrap();
             // Make sure the game was not restarted meanwhile.

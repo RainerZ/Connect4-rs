@@ -24,17 +24,28 @@ src/
   colour is present, else 0; ±1000 for a completed line. The sum is updated
   incrementally on `make`/`unmake` from per-line piece counts, so a node
   costs O(lines through the played square) (≤13) instead of a full scan.
-* Negamax with alpha/beta, column order 4,5,3,2,6,1,7 (centre first), the
-  Java depth heuristic (10, +1 after 16 pieces, +2 with two full columns, 18
-  with more), and the Java "forced loss → re-search at depth 2" fallback.
-* ~20 Mnodes/s single-threaded on Apple Silicon; a typical move takes
-  well under half a second.
+* Negamax with alpha/beta, column order 4,5,3,2,6,1,7 (centre first).
+* Iterative deepening with a wall-clock budget (default 2 s, `--budget`):
+  depth 1, 2, 3, … with the previous best column tried first; a new
+  iteration starts only while less than a third of the budget is used, and
+  an iteration running past 2× the budget is aborted (the previous result is
+  kept). Stops early on a proven win/loss or when the rest of the game is
+  fully searched. Replaces the Java fixed-depth heuristic (10, +1/+2 as
+  columns fill), so the engine reaches depth ~12 in the opening and
+  searches endgames to the end.
+* ~20 Mnodes/s single-threaded on Apple Silicon.
 
 ### GUI (`src/main.rs`)
 
 Keys: `1`–`7` drop a piece, `N`/`Space` new game, `S` swap who starts (and
-start a new game). While the engine thinks the window shows depth and live
-node count; afterwards score, nodes and time of the last search.
+start a new game), `+`/`-` double/halve the engine's think time. The status
+line shows the current think time; while the engine thinks it shows the
+iteration depth and live node count, afterwards score, depth, nodes and time
+of the last search.
+
+```bash
+cargo run --release -- --budget 5     # think time per engine move in seconds (default 2)
+```
 
 ### Control socket (`src/server.rs`)
 
@@ -84,9 +95,11 @@ cargo test --release
 
 Unit tests in `engine.rs` check the line tables, that the incremental score
 matches a full-scan reference port of the Java evaluation over random
-playouts, and that the search finds immediate wins and blocks.
+playouts, that the search finds immediate wins and blocks, and that a real
+zugzwang endgame is proven within the budget.
 
-Search benchmark (ignored by default, prints nodes/s at depth 10/12/14):
+Search benchmark (ignored by default, prints depth reached and nodes/s for
+a 0.5 s and a 2 s budget):
 
 ```bash
 cargo test --release bench_search -- --ignored --nocapture
@@ -159,6 +172,7 @@ commands above.
 
 ### Result so far
 
-Claude (Fable 5) vs. the engine at depth 10, Claude as red moving first:
-the engine won in 34 plies by stacking its diagonals onto Claude's two
-row‑3 threat squares and winning the resulting parity/zugzwang fight.
+Claude (Fable 5) vs. the engine at fixed depth 10, two games: as red
+(moving first) Claude lost in 34 plies to a parity/zugzwang fight after the
+engine stacked its diagonals onto Claude's two row‑3 threat squares; as
+yellow Claude lost in 17 plies to a double threat (diagonal + vertical).

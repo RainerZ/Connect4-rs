@@ -59,7 +59,9 @@ fn execute(shared: &Shared, req: &Value) -> Value {
         Some("state") => json!(shared.game.lock().unwrap().to_json()),
         Some("new") => {
             let es = req.get("engine_starts").and_then(Value::as_bool).unwrap_or(false);
-            *shared.game.lock().unwrap() = Game::new(es);
+            let mut g = shared.game.lock().unwrap();
+            *g = Game::new(es, g.budget);
+            drop(g);
             shared.notify();
             wait_engine(shared);
             json!(shared.game.lock().unwrap().to_json())

@@ -4,9 +4,10 @@
 //! O(#lines-through-square) score update instead of a full re-scan.
 //!
 //! No heap allocation anywhere in this module: all state lives in fixed-size
-//! arrays (the module is `no_std`-compatible apart from `AtomicU64`).
+//! arrays (the module is `no_std`-compatible apart from `AtomicU64` and the search clock).
 
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 pub const COLS: usize = 7;
 pub const ROWS: usize = 6;
@@ -295,12 +296,14 @@ impl Board {
 #[derive(Default)]
 pub struct SearchStats {
     pub nodes: AtomicU64,
+    /// Depth of the iteration currently being searched.
     pub depth: AtomicU64,
 }
 
 pub struct SearchResult {
     pub col: Option<usize>,
     pub score: i32,
+    /// Depth of the deepest completed iteration.
     pub depth: usize,
     pub nodes: u64,
 }
@@ -309,60 +312,62 @@ pub struct Searcher<'a> {
     max_depth: usize,
     stats: &'a SearchStats,
     nodes: u64,
+    /// Hard deadline: if an iteration is still running past it, abort it and
+    /// keep the previous iteration's result.
+    deadline: Instant,
+    aborted: bool,
 }
 
 impl<'a> Searcher<'a> {
-    /// Depth heuristic ported from Java `setOptimalMaxDepth`: go deeper as
-    /// columns fill up.
-    pub fn optimal_depth(board: &Board, initial: usize) -> usize {
-        let full = (0..COLS).filter(|&c| board.height(c) >= ROWS).count();
-        let mut d = initial;
-        match full {
-            0 | 1 => {
-                if board.total() > 16 {
-                    d += 1
-                }
-            }
-            2 => d += 2,
-            _ => d = 18,
-        }
-        let remaining = COLS * ROWS - board.total();
-        if d > remaining {
-            d = remaining;
-        }
-        d
-    }
-
-    /// Compute the best move for `p` on `board`.
-    pub fn best_move(board: &Board, p: Piece, initial_depth: usize, stats: &'a SearchStats) -> SearchResult {
+    /// Compute the best move for `p` on `board` using iterative deepening
+    /// within roughly `budget` wall-clock time. A new iteration is only
+    /// started while less than a third of the budget is used (the last
+    /// iteration dominates the cost); an iteration running past 2x the
+    /// budget is aborted.
+    pub fn best_move(board: &Board, p: Piece, budget: Duration, stats: &'a SearchStats) -> SearchResult {
         let mut b = *board;
-        let max_depth = Self::optimal_depth(&b, initial_depth);
-        let mut s = Searcher { max_depth, stats, nodes: 0 };
-        stats.depth.store(max_depth as u64, Ordering::Relaxed);
+        let t0 = Instant::now();
+        let remaining = COLS * ROWS - b.total();
+        let mut s = Searcher { max_depth: 1, stats, nodes: 0, deadline: t0 + budget * 2, aborted: false };
         stats.nodes.store(0, Ordering::Relaxed);
-        let (mut col, mut score) = s.root(&mut b, p);
-        // Java fallback: a forced loss was found - search shallow so we at
-        // least do not lose immediately (opponent might blunder).
-        if score == -WIN_SCORE && max_depth != 2 && col.is_some() {
-            s.max_depth = 2;
-            stats.depth.store(2, Ordering::Relaxed);
-            let (c2, s2) = s.root(&mut b, p);
-            col = c2;
-            score = s2;
+        let mut best = SearchResult { col: None, score: 0, depth: 0, nodes: 0 };
+        let mut first = None;
+        for depth in 1..=remaining.max(1) {
+            s.max_depth = depth;
+            stats.depth.store(depth as u64, Ordering::Relaxed);
+            let (col, score) = s.root(&mut b, p, first);
+            if s.aborted {
+                break;
+            }
+            best = SearchResult { col, score, depth, nodes: s.nodes };
+            first = col;
+            // Proven win/loss or remaining game fully searched: deeper is pointless.
+            if score == WIN_SCORE || score == -WIN_SCORE || depth >= remaining {
+                break;
+            }
+            if t0.elapsed() * 3 > budget {
+                break;
+            }
         }
-        SearchResult { col, score, depth: s.max_depth, nodes: s.nodes }
+        best.nodes = s.nodes;
+        best
     }
 
-    fn root(&mut self, b: &mut Board, p: Piece) -> (Option<usize>, i32) {
+    fn root(&mut self, b: &mut Board, p: Piece, first: Option<usize>) -> (Option<usize>, i32) {
         let mut alpha = -INF;
         let beta = INF;
         let mut s_max = -INF;
         let mut c_max = None;
-        for &c in COL_ORDER.iter() {
+        // Best column of the previous iteration first, then the static order.
+        let order = first.into_iter().chain(COL_ORDER.iter().copied().filter(|&c| Some(c) != first));
+        for c in order {
             if b.can_play(c) {
                 b.make(c, p);
                 let s = -self.negamax(b, p.other(), 1, -beta, -alpha);
                 b.unmake(c, p);
+                if self.aborted {
+                    return (c_max, s_max);
+                }
                 if s > s_max {
                     s_max = s;
                     c_max = Some(c);
@@ -380,6 +385,12 @@ impl<'a> Searcher<'a> {
         self.nodes += 1;
         if self.nodes & 0xFFFF == 0 {
             self.stats.nodes.store(self.nodes, Ordering::Relaxed);
+            if Instant::now() >= self.deadline {
+                self.aborted = true;
+            }
+        }
+        if self.aborted {
+            return 0;
         }
         let s = b.score_for(p);
         if b.is_full() || depth >= self.max_depth || s == WIN_SCORE || s == -WIN_SCORE {
@@ -489,15 +500,33 @@ mod tests {
             b.make(0, Piece::Red);
             b.make(1, Piece::Yellow);
         }
-        let r = Searcher::best_move(&b, Piece::Red, 4, &stats);
+        let r = Searcher::best_move(&b, Piece::Red, Duration::from_millis(50), &stats);
         assert_eq!(r.col, Some(0));
         assert_eq!(r.score, WIN_SCORE);
-        let r = Searcher::best_move(&b, Piece::Yellow, 4, &stats);
+        let r = Searcher::best_move(&b, Piece::Yellow, Duration::from_millis(50), &stats);
         assert_eq!(r.col, Some(1)); // yellow wins itself first
         b.unmake(1, Piece::Yellow);
         b.make(2, Piece::Yellow);
-        let r = Searcher::best_move(&b, Piece::Yellow, 4, &stats);
+        let r = Searcher::best_move(&b, Piece::Yellow, Duration::from_millis(50), &stats);
         assert_eq!(r.col, Some(0)); // must block
+    }
+
+    /// Endgame from a real game (16 empties, red to move and lost by
+    /// zugzwang): iterative deepening must reach the proven result in budget.
+    #[test]
+    fn proves_endgame_win() {
+        let stats = SearchStats::default();
+        let mut b = Board::new();
+        let mut p = Piece::Red;
+        for c in [4, 4, 4, 4, 3, 2, 5, 6, 3, 4, 5, 4, 3, 3, 5, 5, 5, 5, 7, 7, 1, 1, 7, 3, 1, 3] {
+            b.make(c - 1, p);
+            p = p.other();
+        }
+        let r = Searcher::best_move(&b, Piece::Red, Duration::from_secs(2), &stats);
+        assert_eq!(r.score, -WIN_SCORE, "depth {} nodes {}", r.depth, r.nodes);
+        b.make(6, Piece::Red);
+        let r = Searcher::best_move(&b, Piece::Yellow, Duration::from_secs(2), &stats);
+        assert_eq!(r.score, WIN_SCORE, "depth {} nodes {}", r.depth, r.nodes);
     }
 }
 
@@ -512,11 +541,11 @@ mod bench {
         b.make(3, Piece::Red);
         b.make(3, Piece::Yellow);
         b.make(2, Piece::Red);
-        for depth in [10usize, 12, 14] {
+        for ms in [500u64, 2000] {
             let t = std::time::Instant::now();
-            let r = Searcher::best_move(&b, Piece::Yellow, depth, &stats);
-            let ms = t.elapsed().as_millis().max(1);
-            eprintln!("depth {depth}: col {:?} score {} nodes {} {} ms = {:.1} Mn/s", r.col, r.score, r.nodes, ms, r.nodes as f64 / ms as f64 / 1000.0);
+            let r = Searcher::best_move(&b, Piece::Yellow, Duration::from_millis(ms), &stats);
+            let el = t.elapsed().as_millis().max(1);
+            eprintln!("budget {ms} ms: depth {} col {:?} score {} nodes {} {} ms = {:.1} Mn/s", r.depth, r.col, r.score, r.nodes, el, r.nodes as f64 / el as f64 / 1000.0);
         }
     }
 }
