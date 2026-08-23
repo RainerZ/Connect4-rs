@@ -55,6 +55,16 @@ src/
   colour is present, else 0; ±1000 for a completed line. The sum is updated
   incrementally on `make`/`unmake` from per-line piece counts, so a node
   costs O(lines through the played square) (≤13) instead of a full scan.
+* On top of that a threat/parity evaluation (the classic Connect Four
+  knowledge from Victor Allis' thesis): a line with three stones of one
+  colour and one empty square is a *threat* on that square. Threats on the
+  right zugzwang parity (odd rows for the first player, even for the
+  second) score ±24, wrong-parity ones ±6 — and per column only the
+  *lowest* threat square counts, because threats above it only come alive
+  after it resolves (a square both sides threaten goes to the side whose
+  parity matches). Also incremental: threat transitions are detected from
+  the line values already computed, so the hot path pays two extra
+  compares (~13 Mn/s vs ~17 before).
 * Negamax with alpha/beta, column order 4,5,3,2,6,1,7 (centre first).
 * Iterative deepening with a wall-clock budget (default 2 s, `--budget`):
   depth 1, 2, 3, … with the previous best column tried first; a new
@@ -153,8 +163,10 @@ cargo test --release
 Unit tests in `engine.rs` check the line tables, that the incremental score
 matches a full-scan reference port of the Java evaluation over random
 playouts, that the search finds immediate wins and blocks, and that a real
-zugzwang endgame is proven within the budget; `hints.rs` tests the
-win/block/losing-move detection. A slower test (~7 s) replays the recorded
+zugzwang endgame is proven within the budget, the threat/parity evaluation
+matches an independent full-scan reference over random playouts and weighs
+odd/even-row threats as intended; `hints.rs` tests the win/block/losing-move
+detection. A slower test (~7 s) replays the recorded
 lost game and shows that up to 10 s of think time would not have saved the
 engine: at ply 18 it still picks the recorded move without seeing the loss,
 at ply 20 the loss is proven. An ignored `analyse_recorded_win` helper
@@ -275,8 +287,10 @@ payoff:
 * **Transposition table** — lets the same depth search far more cheaply, so
   the exhaustive endgame phase starts earlier. Purely a speed win, no
   knowledge needed.
-* **Threat-aware evaluation** — count open three-in-a-rows with a
-  playable-eventually fourth square, and weight them by row parity (odd
-  rows for the first player, even for the second). The classic Connect Four
-  heuristic from Victor Allis's thesis; it gives the engine the concept
-  directly instead of relying on search depth.
+* **Threat-aware evaluation** — done on this branch, see the engine
+  section. Measured on the recorded lost game: along the losing line the
+  old evaluation stayed cheerful (+4 … +13 for the engine) until the
+  −1000 proof cliff at ply 20; the new one turns negative from ply 12 on
+  (−18, −9, −28, −16) and deviates from the line as early as ply 6 — it
+  senses the frozen-column threat structure positionally, plies before it
+  is provable.
