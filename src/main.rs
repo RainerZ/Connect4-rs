@@ -1,5 +1,6 @@
 mod engine;
 mod game;
+mod hints;
 mod server;
 
 use eframe::egui;
@@ -9,9 +10,10 @@ use std::time::Duration;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
-/// Usage: connect4-rs [--budget <seconds>]   (think time per engine move, default 2)
-fn parse_args() -> Duration {
+/// Usage: connect4-rs [--budget <seconds>] [--hints]
+fn parse_args() -> (Duration, bool) {
     let mut budget = DEFAULT_BUDGET;
+    let mut hints = false;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -25,8 +27,12 @@ fn parse_args() -> Duration {
                     }
                 }
             }
+            "--hints" => hints = true,
             "-h" | "--help" => {
-                println!("usage: connect4-rs [--budget <seconds>]\n  --budget  think time per engine move (default {})", DEFAULT_BUDGET.as_secs_f64());
+                println!(
+                    "usage: connect4-rs [--budget <seconds>] [--hints]\n  --budget  think time per engine move (default {})\n  --hints   start with LLM assistance hints in the socket/MCP state (toggle with H)",
+                    DEFAULT_BUDGET.as_secs_f64()
+                );
                 std::process::exit(0);
             }
             _ => {
@@ -35,12 +41,12 @@ fn parse_args() -> Duration {
             }
         }
     }
-    budget
+    (budget, hints)
 }
 
 fn main() -> eframe::Result {
-    let budget = parse_args();
-    let shared = Shared::new(false, budget);
+    let (budget, hints) = parse_args();
+    let shared = Shared::new(false, budget, hints);
     {
         let s = shared.clone();
         std::thread::Builder::new().name("engine".into()).stack_size(16 << 20).spawn(move || s.engine_loop()).unwrap();
@@ -68,7 +74,7 @@ impl eframe::App for App {
         let ctx = ui.ctx().clone();
         let ctx = &ctx;
         // Keyboard: 1-7 drop piece, N / Space new game, S swap who starts + new game,
-        // +/- double/halve the think time
+        // +/- double/halve the think time, H toggle LLM hints
         let mut changed = false;
         ctx.input(|i| {
             let mut g = self.shared.game.lock().unwrap();
@@ -78,13 +84,13 @@ impl eframe::App for App {
                 }
             }
             if i.key_pressed(egui::Key::N) || i.key_pressed(egui::Key::Space) {
-                let (es, bud) = (g.engine_starts, g.budget);
-                *g = game::Game::new(es, bud);
+                let (es, bud, h) = (g.engine_starts, g.budget, g.hints);
+                *g = game::Game::new(es, bud, h);
                 changed = true;
             }
             if i.key_pressed(egui::Key::S) {
-                let (es, bud) = (!g.engine_starts, g.budget);
-                *g = game::Game::new(es, bud);
+                let (es, bud, h) = (!g.engine_starts, g.budget, g.hints);
+                *g = game::Game::new(es, bud, h);
                 changed = true;
             }
             if i.key_pressed(egui::Key::Plus) || i.key_pressed(egui::Key::Equals) {
@@ -92,6 +98,9 @@ impl eframe::App for App {
             }
             if i.key_pressed(egui::Key::Minus) {
                 g.budget = (g.budget / 2).max(Duration::from_millis(50));
+            }
+            if i.key_pressed(egui::Key::H) {
+                g.hints = !g.hints;
             }
         });
         if changed {
@@ -103,10 +112,11 @@ impl eframe::App for App {
         {
             ui.heading(g.message());
             let mut info = format!(
-                "You: {}   Engine: {}   Think time: {} s (+/-)   Keys: 1-7 move, N new game, S swap starter",
+                "You: {}   Engine: {}   Think time: {} s (+/-)   LLM hints: {} (H)   Keys: 1-7 move, N new game, S swap starter",
                 if g.human == Piece::Red { "Red" } else { "Yellow" },
                 if g.engine() == Piece::Red { "Red" } else { "Yellow" },
-                g.budget.as_secs_f64()
+                g.budget.as_secs_f64(),
+                if g.hints { "on" } else { "off" }
             );
             if thinking {
                 info += &format!(

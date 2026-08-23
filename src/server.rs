@@ -1,5 +1,6 @@
 //! Minimal control socket: one JSON object per line in, one JSON line out.
 //! {"cmd":"state"} | {"cmd":"move","col":1..7} | {"cmd":"new","engine_starts":bool}
+//! {"cmd":"hints","on":bool}   toggles LLM assistance (see hints.rs)
 //! `move` blocks until the engine has answered (or the game ended).
 
 use crate::game::{Game, Shared, Status, PORT};
@@ -60,7 +61,7 @@ fn execute(shared: &Shared, req: &Value) -> Value {
         Some("new") => {
             let es = req.get("engine_starts").and_then(Value::as_bool).unwrap_or(false);
             let mut g = shared.game.lock().unwrap();
-            *g = Game::new(es, g.budget);
+            *g = Game::new(es, g.budget, g.hints);
             drop(g);
             shared.notify();
             wait_engine(shared);
@@ -80,6 +81,16 @@ fn execute(shared: &Shared, req: &Value) -> Value {
             wait_engine(shared);
             json!(shared.game.lock().unwrap().to_json())
         }
-        _ => json!({"error": "unknown cmd, use state | move | new"}),
+        Some("hints") => {
+            let mut g = shared.game.lock().unwrap();
+            if let Some(on) = req.get("on").and_then(Value::as_bool) {
+                g.hints = on;
+            }
+            let j = g.to_json();
+            drop(g);
+            shared.notify();
+            json!(j)
+        }
+        _ => json!({"error": "unknown cmd, use state | move | new | hints"}),
     }
 }

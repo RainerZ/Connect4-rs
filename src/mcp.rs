@@ -29,6 +29,11 @@ fn tools() -> Value {
             "inputSchema": {"type": "object", "properties": {"col": {"type": "integer", "minimum": 1, "maximum": 7}}, "required": ["col"]}
         },
         {
+            "name": "connect4_hints",
+            "description": "LLM assistance toggle (not used by the engine): with on=true every state includes 'hints' - next free row per column, columns that win immediately, columns that must be blocked, and columns that lose at once. Use to compare play with and without bookkeeping help. Returns the current state.",
+            "inputSchema": {"type": "object", "properties": {"on": {"type": "boolean"}}, "required": ["on"]}
+        },
+        {
             "name": "connect4_new",
             "description": "Start a new game. engine_starts=true lets the engine play red and move first (you are yellow).",
             "inputSchema": {"type": "object", "properties": {"engine_starts": {"type": "boolean", "default": false}}}
@@ -48,6 +53,18 @@ fn render(state: &Value) -> String {
         }
         s.push_str("1 2 3 4 5 6 7\n");
     }
+    // LLM assistance hints (optional, see hints.rs) as a readable line.
+    if let Some(h) = state.get("hints") {
+        let list = |k: &str| {
+            let v: Vec<String> = h.get(k).and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_u64).map(|c| c.to_string()).collect()).unwrap_or_default();
+            if v.is_empty() { "none".to_string() } else { v.join(",") }
+        };
+        let rows: Vec<String> = h.get("next_row").and_then(Value::as_array).map(|a| a.iter().map(|r| r.as_u64().map(|r| r.to_string()).unwrap_or_else(|| "-".into())).collect()).unwrap_or_default();
+        s.push_str(&format!(
+            "hints: next free row per column {}  |  you win now: {}  |  must block: {}  |  losing moves: {}\n",
+            rows.join(" "), list("winning_moves"), list("must_block"), list("losing_moves")
+        ));
+    }
     s.push_str(&serde_json::to_string(state).unwrap());
     s
 }
@@ -57,6 +74,7 @@ fn call(name: &str, args: &Value) -> Result<Value, String> {
         "connect4_state" => json!({"cmd": "state"}),
         "connect4_move" => json!({"cmd": "move", "col": args.get("col").cloned().unwrap_or(Value::Null)}),
         "connect4_new" => json!({"cmd": "new", "engine_starts": args.get("engine_starts").and_then(Value::as_bool).unwrap_or(false)}),
+        "connect4_hints" => json!({"cmd": "hints", "on": args.get("on").and_then(Value::as_bool).unwrap_or(false)}),
         _ => return Err(format!("unknown tool {name}")),
     };
     let resp = gui(req)?;

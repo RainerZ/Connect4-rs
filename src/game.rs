@@ -1,6 +1,7 @@
 //! Game state shared between GUI, engine thread and the control socket.
 
 use crate::engine::{Board, Piece, SearchStats, Searcher, COLS, ROWS};
+use crate::hints::{self, Hints};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
@@ -35,6 +36,8 @@ pub struct Game {
     /// Think time per move (iterative deepening budget).
     pub budget: Duration,
     pub engine_starts: bool,
+    /// LLM assistance (see hints.rs): include tactical hints in the JSON state.
+    pub hints: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -57,10 +60,13 @@ pub struct StateJson {
     pub history: Vec<usize>,
     pub last_search: Option<LastSearch>,
     pub message: String,
+    /// Only present when hints are enabled (LLM assistance, see hints.rs).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hints: Option<Hints>,
 }
 
 impl Game {
-    pub fn new(engine_starts: bool, budget: Duration) -> Game {
+    pub fn new(engine_starts: bool, budget: Duration, hints: bool) -> Game {
         let human = if engine_starts { Piece::Yellow } else { Piece::Red };
         Game {
             board: Board::new(),
@@ -71,6 +77,7 @@ impl Game {
             last_search: None,
             budget,
             engine_starts,
+            hints,
         }
     }
 
@@ -133,6 +140,7 @@ impl Game {
             history: self.history.iter().map(|c| c + 1).collect(),
             last_search: self.last_search.clone(),
             message: self.message(),
+            hints: if self.hints && self.status == Status::HumanToMove { Some(hints::compute(&self.board, self.to_move)) } else { None },
         }
     }
 }
@@ -147,9 +155,9 @@ pub struct Shared {
 }
 
 impl Shared {
-    pub fn new(engine_starts: bool, budget: Duration) -> Arc<Shared> {
+    pub fn new(engine_starts: bool, budget: Duration, hints: bool) -> Arc<Shared> {
         Arc::new(Shared {
-            game: Mutex::new(Game::new(engine_starts, budget)),
+            game: Mutex::new(Game::new(engine_starts, budget, hints)),
             changed: Condvar::new(),
             stats: SearchStats::default(),
             repaint: Mutex::new(None),
