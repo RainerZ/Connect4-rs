@@ -15,9 +15,9 @@ the engine — more on that [below](#results-so-far).*
 ## Highlights
 
 * **Fast engine** — two `u64` bitboards, incrementally updated evaluation,
-  negamax with alpha/beta, iterative deepening on a time budget. Endgames
-  are searched to the end; proven wins are announced and hopeless positions
-  resigned.
+  negamax with alpha/beta, transposition table, principal variation search
+  and MTD(f), iterative deepening on a time budget. Endgames are searched
+  to the end; proven wins are announced and hopeless positions resigned.
 * **Human-friendly GUI** — click to drop (with a landing ghost), gravity
   drop animation, tactical hint rings, eval bar, think-time slider.
 * **LLM-friendly interface** — a JSON control socket and an MCP server with
@@ -55,16 +55,26 @@ src/
   colour is present, else 0; ±1000 for a completed line. The sum is updated
   incrementally on `make`/`unmake` from per-line piece counts, so a node
   costs O(lines through the played square) (≤13) instead of a full scan.
-* Negamax with alpha/beta, column order 4,5,3,2,6,1,7 (centre first).
+* Negamax with alpha/beta, column order 4,5,3,2,6,1,7 (centre first),
+  principal variation search (first child full window, siblings zero
+  window with re-search).
+* Transposition table: 2^22 entries × 16 bytes (64 MB), keyed by Pascal
+  Pons' perfect 49-bit position key (`mover + occupancy + bottom row` —
+  the carry marks each column's stack height), storing score, bound type
+  (exact/lower/upper) and best column, always-replace.
+* MTD(f) on top: each depth converges on the minimax value with a few
+  zero-window searches around the previous score. Zero windows keep the
+  stored bounds maximally reusable and pair naturally with PVS.
 * Iterative deepening with a wall-clock budget (default 2 s, `--budget`):
   depth 1, 2, 3, … with the previous best column tried first; a new
   iteration starts only while less than a third of the budget is used, and
   an iteration running past 2× the budget is aborted (the previous result is
   kept). Stops early on a proven win/loss or when the rest of the game is
   fully searched. Replaces the Java fixed-depth heuristic (10, +1/+2 as
-  columns fill), so the engine reaches depth ~12 in the opening and
-  searches endgames to the end.
-* ~20 Mnodes/s single-threaded on Apple Silicon.
+  columns fill).
+* ~15-20 Mnodes/s single-threaded on Apple Silicon; with the table, PVS
+  and MTD(f) a 2 s budget reaches depth 13 from the opening (~2× fewer
+  nodes than plain alpha/beta) and proves endgames in milliseconds.
 
 ### GUI (`src/main.rs`)
 
@@ -154,11 +164,15 @@ Unit tests in `engine.rs` check the line tables, that the incremental score
 matches a full-scan reference port of the Java evaluation over random
 playouts, that the search finds immediate wins and blocks, and that a real
 zugzwang endgame is proven within the budget; `hints.rs` tests the
-win/block/losing-move detection. A slower test (~7 s) replays the recorded
-lost game and shows that up to 10 s of think time would not have saved the
-engine: at ply 18 it still picks the recorded move without seeing the loss,
-at ply 20 the loss is proven. An ignored `analyse_recorded_win` helper
-prints the 10 s evaluation of every engine move of that game.
+win/block/losing-move detection, and a search with a warm transposition
+table is checked against a plain no-table negamax on positions solved to
+the end of the game. A slower test replays the recorded lost game: at
+ply 18 even a 10 s search cannot prove the loss (it is beyond a depth-20
+horizon), while at ply 20 the loss is proven in about 100 ms. An ignored
+`analyse_recorded_win` helper prints the 10 s evaluation of every engine
+move of that game — with the transposition table and MTD(f) it reaches
+1-4 plies deeper than before and deviates from the recorded line from
+ply 14 on.
 
 Search benchmark (ignored by default, prints depth reached and nodes/s for
 a 0.5 s and a 2 s budget):
@@ -269,12 +283,10 @@ prophylaxis, freezing column 2, the tempo fight) was the model's own.
 
 ### Ideas for the engine
 
-Ways the engine could handle such positions knowingly, roughly in order of
-payoff:
+Done so far: iterative deepening on a time budget; transposition table +
+PVS + MTD(f) (≈2× fewer nodes, endgame proofs in milliseconds, 1-4 plies
+deeper at the same budget). Still open:
 
-* **Transposition table** — lets the same depth search far more cheaply, so
-  the exhaustive endgame phase starts earlier. Purely a speed win, no
-  knowledge needed.
 * **Threat-aware evaluation** — count open three-in-a-rows with a
   playable-eventually fourth square, and weight them by row parity (odd
   rows for the first player, even for the second). The classic Connect Four
