@@ -130,7 +130,18 @@ impl eframe::App for App {
 
         let mut g = self.shared.game.lock().unwrap();
         let thinking = g.status == Status::Thinking;
-        {
+        // Content column exactly as wide as the board, centred so the window
+        // frame keeps the same small border left and right; heading, status
+        // text and settings strip align with the board edges.
+        let margin = 12.0;
+        let outer = ui.available_rect_before_wrap();
+        let cell_est = ((outer.width() - 2.0 * margin) / COLS as f32)
+            .min((outer.height() - 150.0) / ROWS as f32)
+            .clamp(20.0, 90.0);
+        let content_w = cell_est * COLS as f32;
+        let x0 = outer.min.x + ((outer.width() - content_w) * 0.5).max(margin);
+        let content = egui::Rect::from_min_max(egui::pos2(x0, outer.min.y + 8.0), egui::pos2(x0 + content_w, outer.max.y));
+        ui.scope_builder(egui::UiBuilder::new().max_rect(content), |ui| {
             // Headline, coloured when something special is going on: red for
             // an announced forced engine win, green when the human has won.
             let heading = egui::RichText::new(g.message());
@@ -347,8 +358,7 @@ impl eframe::App for App {
                     ui.visuals().text_color(),
                 );
             }
-
-        }
+        });
         drop(g);
         if changed {
             self.shared.notify();
