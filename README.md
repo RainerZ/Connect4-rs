@@ -3,10 +3,6 @@
 **A Connect Four engine in Rust — play it yourself, or let your favourite
 LLM try to beat it while you watch.**
 
-Bitboard engine searching ~20 million positions per second, a clean egui
-desktop GUI, and an [MCP](https://modelcontextprotocol.io) server that turns
-the running game into three tools any LLM agent can play with.
-
 The project started with the idea of seeing how strong an LLM can play
 Connect Four. It turned out that the naive negamax/alpha-beta approach on
 a fast heuristic board score, with a few seconds of think time per move,
@@ -22,6 +18,11 @@ The final engine, starting the game with only a 109 KB opening book
 distilled from a perfect solver, holds the win against that same perfect
 solver at 2 seconds per move — while more think time without the
 knowledge had lost the game on the very first move.
+
+Under the hood: a bitboard engine searching ~20 million positions per
+second, a clean egui desktop GUI, and an
+[MCP](https://modelcontextprotocol.io) server that turns the running game
+into tools any LLM agent can play with.
 
 ## Highlights
 
