@@ -11,10 +11,13 @@
 //! series so its transposition table stays warm.
 
 #[allow(dead_code)]
+mod book;
+#[allow(dead_code)]
 mod engine;
 #[allow(dead_code)]
 mod solver;
 
+use book::Book;
 use engine::{Board, Piece, SearchStats, Searcher, TransTable};
 use solver::ExternalSolver;
 use std::time::{Duration, Instant};
@@ -23,6 +26,7 @@ fn main() {
     let mut solver_cmd = None;
     let mut budgets = vec![2.0f64];
     let mut solver_starts = false;
+    let mut book_path = None;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -36,8 +40,9 @@ fn main() {
                     .collect();
             }
             "--solver-starts" => solver_starts = true,
+            "--book" => book_path = args.next(),
             _ => {
-                eprintln!("usage: versus --solver <cmd> [--budgets 2,5,10] [--solver-starts]");
+                eprintln!("usage: versus --solver <cmd> [--budgets 2,5,10] [--solver-starts] [--book <file>]");
                 std::process::exit(2);
             }
         }
@@ -51,6 +56,14 @@ fn main() {
         std::process::exit(2);
     });
     let stats = SearchStats::default();
+    let book = book_path.map(|p| {
+        let b = Book::load(std::path::Path::new(&p)).unwrap_or_else(|e| {
+            eprintln!("{e}");
+            std::process::exit(2);
+        });
+        eprintln!("opening book: {} positions", b.len());
+        b
+    });
 
     for &budget in &budgets {
         let budget_d = Duration::from_secs_f64(budget);
@@ -72,14 +85,17 @@ fn main() {
             let ply = b.total() + 1;
             if to_move == engine_p {
                 let t = Instant::now();
-                let r = Searcher::best_move(&b, engine_p, budget_d, &stats, &mut tt);
-                let col = r.col.expect("no move");
+                let bm = book.as_ref().and_then(|bk| bk.get(b.key(engine_p)));
+                let (col, note) = match bm {
+                    Some((col, raw)) => (col, format!("book raw {raw:3}")),
+                    None => {
+                        let r = Searcher::best_move(&b, engine_p, budget_d, &stats, &mut tt);
+                        (r.col.expect("no move"), format!("depth {:2} score {:5}", r.depth, r.score))
+                    }
+                };
                 b.make(col, engine_p);
                 history.push(col);
-                println!(
-                    "ply {ply:2}  engine col {} depth {:2} score {:5}  {:5} ms",
-                    col + 1, r.depth, r.score, t.elapsed().as_millis()
-                );
+                println!("ply {ply:2}  engine col {} {note}  {:5} ms", col + 1, t.elapsed().as_millis());
                 if b.has_won(engine_p) {
                     break "ENGINE WINS";
                 }

@@ -20,6 +20,10 @@ path = "src/mcp.rs"
 name = "versus"
 path = "src/versus.rs"
 
+[[bin]]
+name = "bookgen"
+path = "src/bookgen.rs"
+
 [profile.release]
 opt-level = 3
 lto = "fat"

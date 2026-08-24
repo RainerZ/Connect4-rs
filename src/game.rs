@@ -1,6 +1,7 @@
 //! Game state shared between GUI, engine thread and the control socket.
 
 use crate::engine::{Board, Piece, SearchStats, Searcher, TransTable, COLS, ROWS};
+use crate::book::Book;
 use crate::solver::ExternalSolver;
 use crate::hints::{self, Hints};
 use serde::{Deserialize, Serialize};
@@ -211,16 +212,19 @@ pub struct Shared {
     pub repaint: Mutex<Option<eframe::egui::Context>>,
     /// External solver command playing the engine seat (--solver).
     pub solver: Option<String>,
+    /// Opening book consulted before searching (--book).
+    pub book: Option<Book>,
 }
 
 impl Shared {
-    pub fn new(engine_starts: bool, budget: Duration, hints: bool, solver: Option<String>) -> Arc<Shared> {
+    pub fn new(engine_starts: bool, budget: Duration, hints: bool, solver: Option<String>, book: Option<Book>) -> Arc<Shared> {
         Arc::new(Shared {
             game: Mutex::new(Game::new(engine_starts, budget, hints, hints)),
             changed: Condvar::new(),
             stats: SearchStats::default(),
             repaint: Mutex::new(None),
             solver,
+            book,
         })
     }
 
@@ -255,7 +259,13 @@ impl Shared {
                 (g.board, g.engine(), g.budget, g.history.clone())
             };
             let t0 = Instant::now();
-            let r = if let Some(sv) = solver.as_mut() {
+            let book_move = self.book.as_ref().and_then(|bk| bk.get(board.key(p)));
+            let r = if let Some((col, raw)) = book_move {
+                // Book hit: play instantly; distilled entries are proven
+                // winning moves, so report them as such.
+                let score = if raw > 0 { crate::engine::WIN_SCORE } else { raw * 10 };
+                crate::engine::SearchResult { col: Some(col), score, depth: COLS * ROWS - board.total(), nodes: 0 }
+            } else if let Some(sv) = solver.as_mut() {
                 match sv.best_move(&history) {
                     Ok((col, score, _raw)) => {
                         // Depth reported as "solved to the end of the game".

@@ -1,5 +1,6 @@
 mod engine;
 mod game;
+mod book;
 mod hints;
 mod server;
 mod solver;
@@ -11,11 +12,12 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-/// Usage: connect4-rs [--budget <seconds>] [--no-hints] [--solver <path>]
-fn parse_args() -> (Duration, bool, Option<String>) {
+/// Usage: connect4-rs [--budget <seconds>] [--no-hints] [--solver <path>] [--book <file>]
+fn parse_args() -> (Duration, bool, Option<String>, Option<String>) {
     let mut budget = DEFAULT_BUDGET;
     let mut hints = true;
     let mut solver = None;
+    let mut book = None;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -38,9 +40,16 @@ fn parse_args() -> (Duration, bool, Option<String>) {
                     std::process::exit(2);
                 }
             },
+            "--book" => match args.next() {
+                Some(p) => book = Some(p),
+                None => {
+                    eprintln!("--book needs a book file (see the bookgen binary)");
+                    std::process::exit(2);
+                }
+            },
             "-h" | "--help" => {
                 println!(
-                    "usage: connect4-rs [--budget <seconds>] [--no-hints] [--solver <path>]\n  --budget, -b  think time per engine move in seconds (default {})\n  --no-hints    start with LLM hints (socket/MCP state) and the GUI hint rings off;\n                both can be re-enabled at runtime (checkboxes/H, hints command, MCP tool)\n  --solver      an external solver plays the engine seat (Pascal Pons' line\n                protocol); extra args allowed, e.g. --solver 'path/c4solver -w'.\n                A 7x6.book next to the binary is picked up automatically",
+                    "usage: connect4-rs [--budget <seconds>] [--no-hints] [--solver <path>]\n  --budget, -b  think time per engine move in seconds (default {})\n  --no-hints    start with LLM hints (socket/MCP state) and the GUI hint rings off;\n                both can be re-enabled at runtime (checkboxes/H, hints command, MCP tool)\n  --solver      an external solver plays the engine seat (Pascal Pons' line\n                protocol); extra args allowed, e.g. --solver 'path/c4solver -w'.\n                A 7x6.book next to the binary is picked up automatically\n  --book        opening book for the engine seat (default: opening-book.txt\n                in the working directory if present; see the bookgen binary)",
                     DEFAULT_BUDGET.as_secs_f64()
                 );
                 std::process::exit(0);
@@ -51,13 +60,24 @@ fn parse_args() -> (Duration, bool, Option<String>) {
             }
         }
     }
-    (budget, hints, solver)
+    (budget, hints, solver, book)
 }
 
 fn main() -> eframe::Result {
-    let (budget, hints, solver) = parse_args();
+    let (budget, hints, solver, book) = parse_args();
     let solver_active = solver.is_some();
-    let shared = Shared::new(false, budget, hints, solver);
+    // An explicitly named book must load; the default one is best-effort.
+    let book = match &book {
+        Some(p) => Some(book::Book::load(std::path::Path::new(p)).unwrap_or_else(|e| {
+            eprintln!("{e}");
+            std::process::exit(2);
+        })),
+        None => book::Book::load(std::path::Path::new("opening-book.txt")).ok(),
+    };
+    if let Some(b) = &book {
+        eprintln!("opening book loaded: {} positions", b.len());
+    }
+    let shared = Shared::new(false, budget, hints, solver, book);
     {
         let s = shared.clone();
         std::thread::Builder::new().name("engine".into()).stack_size(16 << 20).spawn(move || s.engine_loop()).unwrap();

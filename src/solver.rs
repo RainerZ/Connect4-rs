@@ -49,7 +49,10 @@ impl ExternalSolver {
     /// GUI announces it - a proven loss a mildly negative score so the
     /// seat plays on, a draw 0) and the raw solver score (positive: the
     /// side to move wins, higher = faster; 0: draw; negative: loses).
-    pub fn best_move(&mut self, history: &[usize]) -> Result<(usize, i32, i32), String> {
+    /// Raw per-column scores (`-a` analysis) for the position reached by
+    /// `history` (0-based columns): positive = the side to move wins,
+    /// negative = loses, 0 = draw, INVALID_MOVE = column full.
+    pub fn analyze(&mut self, history: &[usize]) -> Result<[i32; 7], String> {
         let line: String = history.iter().map(|c| char::from(b'1' + *c as u8)).collect();
         writeln!(self.stdin, "{line}").map_err(|e| format!("solver stdin: {e}"))?;
         self.stdin.flush().map_err(|e| format!("solver stdin: {e}"))?;
@@ -66,17 +69,24 @@ impl ExternalSolver {
             .skip(if line.is_empty() { 0 } else { 1 })
             .map(|t| t.parse::<i32>().map_err(|_| format!("bad solver reply: {reply:?}")))
             .collect::<Result<_, _>>()?;
-        if scores.len() != 7 {
-            return Err(format!("bad solver reply: {reply:?}"));
-        }
-        // Best column: maximum score, centre-first tie break, full columns
-        // (INVALID_MOVE) excluded. Negative maxima are the slowest loss.
-        let col = COL_ORDER
+        scores.try_into().map_err(|_| format!("bad solver reply: {reply:?}"))
+    }
+
+    /// The best column (0-based) in `history`'s position: maximum raw
+    /// score, centre-first tie break, full columns excluded (negative
+    /// maxima are the slowest loss).
+    pub fn pick(scores: &[i32; 7]) -> Result<usize, String> {
+        COL_ORDER
             .iter()
             .copied()
             .filter(|&c| scores[c] != INVALID_MOVE)
             .max_by_key(|&c| scores[c])
-            .ok_or_else(|| "no playable column".to_string())?;
+            .ok_or_else(|| "no playable column".to_string())
+    }
+
+    pub fn best_move(&mut self, history: &[usize]) -> Result<(usize, i32, i32), String> {
+        let scores = self.analyze(history)?;
+        let col = Self::pick(&scores)?;
         let s = scores[col];
         let mapped = if s > 0 {
             WIN_SCORE
