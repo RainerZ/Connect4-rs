@@ -224,11 +224,18 @@ impl eframe::App for App {
                     self.shared.stats.nodes.load(Ordering::Relaxed)
                 )
             } else if let Some(ls) = &g.last_search {
-                format!(
-                    "last engine move: col {}  score {}  depth {}  nodes {}  {} ms ({:.1} Mnodes/s)",
-                    ls.col, ls.score, ls.depth, ls.nodes, ls.millis,
-                    ls.nodes as f64 / (ls.millis.max(1) as f64 * 1000.0)
-                )
+                if ls.book {
+                    format!(
+                        "last engine move: col {}  from the solver book  (own eval: score {} depth {})",
+                        ls.col, ls.score, ls.depth
+                    )
+                } else {
+                    format!(
+                        "last engine move: col {}  score {}  depth {}  nodes {}  {} ms ({:.1} Mnodes/s)",
+                        ls.col, ls.score, ls.depth, ls.nodes, ls.millis,
+                        ls.nodes as f64 / (ls.millis.max(1) as f64 * 1000.0)
+                    )
+                }
             } else {
                 String::new()
             };

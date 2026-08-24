@@ -194,8 +194,12 @@ The result is `opening-book.txt`, committed in the repo: one line per
 position — 49-bit position key (hex), best column, raw solver score. The
 engine seat consults it before searching (`--book <file>`, or
 automatically when `opening-book.txt` sits in the working directory —
-both the GUI and `versus`) and plays hits instantly, reported as proven
-wins. **With the book, the engine beats the perfect solver as first
+both the GUI and `versus`). A book hit plays the book move, but is not
+reported as a forced win: the status line and the socket/MCP state mark
+it as a book move (`book: true`), and a short search (a quarter of the
+budget) supplies the engine's own evaluation for the score display — the
+forced-win banner stays reserved for the engine's own proofs and the
+solver seat. **With the book, the engine beats the perfect solver as first
 player at a 2 s budget** — the solver's move-by-move verdict never
 leaves −1, the unassisted heuristic middlegame (plies 13–25) holds the
 unique win by itself, the engine's own proofs take over from ply 25 and

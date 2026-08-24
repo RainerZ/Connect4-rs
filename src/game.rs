@@ -29,6 +29,8 @@ pub struct EngineMove {
     pub depth: usize,
     pub nodes: u64,
     pub millis: u128,
+    /// The move came from the opening book (solver-distilled), not a search.
+    pub book: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -65,6 +67,9 @@ pub struct LastSearch {
     pub depth: usize,
     pub nodes: u64,
     pub millis: u128,
+    /// True when the move came from the solver opening book.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub book: bool,
 }
 
 /// JSON view of the game, returned by the control socket.
@@ -163,7 +168,7 @@ impl Game {
     /// play the move. Factored out of the engine thread for testability.
     pub fn apply_engine_result(&mut self, r: &EngineMove) {
         if let Some(col) = r.col {
-            self.last_search = Some(LastSearch { col: col + 1, score: r.score, depth: r.depth, nodes: r.nodes, millis: r.millis });
+            self.last_search = Some(LastSearch { col: col + 1, score: r.score, depth: r.depth, nodes: r.nodes, millis: r.millis, book: r.book });
             if r.score <= -crate::engine::WIN_SCORE {
                 // Every line loses against best play: concede instead of
                 // playing on to the bitter end.
@@ -260,11 +265,15 @@ impl Shared {
             };
             let t0 = Instant::now();
             let book_move = self.book.as_ref().and_then(|bk| bk.get(board.key(p)));
-            let r = if let Some((col, raw)) = book_move {
-                // Book hit: play instantly; distilled entries are proven
-                // winning moves, so report them as such.
-                let score = if raw > 0 { crate::engine::WIN_SCORE } else { raw * 10 };
-                crate::engine::SearchResult { col: Some(col), score, depth: COLS * ROWS - board.total(), nodes: 0 }
+            let is_book = book_move.is_some();
+            let r = if let Some((col, _raw)) = book_move {
+                // Book hit: the move is played from the book regardless,
+                // but deliberately NOT reported as a proven win - instead a
+                // short search (a quarter of the budget) computes the
+                // engine's own evaluation for the score display, and the
+                // book flag records where the move came from.
+                let r = Searcher::best_move(&board, p, budget / 4, &self.stats, &mut tt);
+                crate::engine::SearchResult { col: Some(col), score: r.score, depth: r.depth, nodes: r.nodes }
             } else if let Some(sv) = solver.as_mut() {
                 match sv.best_move(&history) {
                     Ok((col, score, _raw)) => {
@@ -286,7 +295,7 @@ impl Shared {
             if g.status == Status::Thinking && g.board.bitboard(Piece::Red) == board.bitboard(Piece::Red)
                 && g.board.bitboard(Piece::Yellow) == board.bitboard(Piece::Yellow)
             {
-                g.apply_engine_result(&EngineMove { col: r.col, score: r.score, depth: r.depth, nodes: r.nodes, millis });
+                g.apply_engine_result(&EngineMove { col: r.col, score: r.score, depth: r.depth, nodes: r.nodes, millis, book: is_book });
             }
             drop(g);
             self.notify();
@@ -336,7 +345,7 @@ mod tests {
         let mut tt = crate::engine::TransTable::new();
         let r = crate::engine::Searcher::best_move(&g.board, Piece::Yellow, Duration::from_secs(5), &stats, &mut tt);
         assert_eq!(r.score, -WIN_SCORE);
-        g.apply_engine_result(&EngineMove { col: r.col, score: r.score, depth: r.depth, nodes: r.nodes, millis: 0 });
+        g.apply_engine_result(&EngineMove { col: r.col, score: r.score, depth: r.depth, nodes: r.nodes, millis: 0, book: false });
         assert!(g.resigned);
         assert_eq!(g.status, Status::Won(WinnerJs::Human));
         assert!(g.message().contains("gives up"));
@@ -353,7 +362,7 @@ mod tests {
         let mut tt = crate::engine::TransTable::new();
         let r = crate::engine::Searcher::best_move(&g.board, Piece::Yellow, Duration::from_secs(5), &stats, &mut tt);
         assert_eq!(r.score, WIN_SCORE);
-        g.apply_engine_result(&EngineMove { col: r.col, score: r.score, depth: r.depth, nodes: r.nodes, millis: 0 });
+        g.apply_engine_result(&EngineMove { col: r.col, score: r.score, depth: r.depth, nodes: r.nodes, millis: 0, book: false });
         assert!(!g.resigned);
         assert_eq!(g.status, Status::HumanToMove);
         assert!(g.engine_sees_win());
