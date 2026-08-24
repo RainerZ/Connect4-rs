@@ -7,17 +7,21 @@ Bitboard engine searching ~20 million positions per second, a clean egui
 desktop GUI, and an [MCP](https://modelcontextprotocol.io) server that turns
 the running game into three tools any LLM agent can play with.
 
-**What this lab taught us:** knowledge beats think time. With a 109 KB
-opening book distilled from a perfect solver and a threat/parity
-evaluation, 2 seconds of search per move [beat the perfect
-solver](#the-opening-book--distilled-from-the-solver) wire to wire —
-while 10 seconds *without* that knowledge lost the game on the very
-first move.
+The project started with the idea of seeing how strong an LLM can play
+Connect Four. It turned out that the naive negamax/alpha-beta approach on
+a fast heuristic board score, with a few seconds of think time per move,
+was beatable by the LLM:
 
 <p align="center"><img src="docs/winning-board.png" alt="Claude's winning board against the engine" width="520"></p>
 
 *The board above is a historic moment: the first game Claude won against
 the engine — more on that [below](#results-so-far).*
+
+After that, the engine was improved step by step — see the details below.
+The final engine, starting the game with only a 109 KB opening book
+distilled from a perfect solver, holds the win against that same perfect
+solver at 2 seconds per move — while more think time without the
+knowledge had lost the game on the very first move.
 
 ## Highlights
 
