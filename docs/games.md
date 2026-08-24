@@ -1,7 +1,8 @@
 # Game records: Claude (Fable 5) vs. the engine
 
 All games played 2026-08-23/24 over the MCP interface, engine at the 2 s
-default budget unless noted. Columns are 1–7; moves alternate starting
+default budget unless noted (game 9: Pascal Pons' perfect solver in the
+engine seat via `--solver`). Columns are 1–7; moves alternate starting
 with the first player. Any game can be replayed onto the running GUI:
 
 ```bash
@@ -85,3 +86,18 @@ both open columns, sealed the parity with the quiet c1r1 (+1000 announced
 at depth 15 on that move), burned the neutral squares and won when Claude
 ran out of safe moves — Claude's own game-4 strategy, played back without
 hints and proven fifteen plies out.
+
+## 9 — perfect solver (`--solver`, bookless) · Claude red, hints on · solver wins, 26 plies
+
+```
+4,4,4,4,4,7,5,6,3,2,5,5,6,2,3,3,1,3,3,7,7,7,2,2,5,5
+```
+
+Claude held the theoretical first-player win for eight plies (the solver's
+score stayed at "losing as slowly as possible"), then threw the win at
+ply 9 (c3r1, a tempo-grabbing forcing move — the solver proved the draw in
+1 ms) and the draw at ply 11 (c5r2, enabling the c5r3 diagonal hub). The
+execution ended with the signature stacked double: Claude's forced row-4
+block at c5r4 directly beneath the solver's diagonal win at c5r5. Solver
+think times fell from 101 s (first bookless query) to 0 ms as its
+kept-alive process warmed up.

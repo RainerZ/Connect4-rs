@@ -303,9 +303,9 @@ commands above.
 
 ### Results so far
 
-Claude (Fable 5) vs. the engine: **engine 6 – Claude 2**. Every engine
-version won in its own characteristic way — which is what this repo is
-about.
+Claude (Fable 5) vs. the engine seat: **7 – 2** (including one game
+against the perfect solver). Every engine version won in its own
+characteristic way — which is what this repo is about.
 
 Without hints, Claude lost all three games — twice at fixed depth 10 (a
 parity/zugzwang squeeze in 34 plies; a diagonal + vertical double threat in
@@ -361,6 +361,16 @@ strategy Claude had used to beat the simple engine in its first win,
 played back without hints and proven fifteen plies out: the threat
 evaluation supplied the structure, the transposition-table search the
 proof and the flawless execution.
+
+Finally Claude played the perfect solver (`--solver`, game 9 in
+[docs/games.md](docs/games.md)) — and perfection turned out to be the
+best teacher: Claude held the theoretical win for eight plies before a
+tempo-grabbing forcing move dropped it to a draw (the solver proved that
+in a millisecond) and an overeager consolidating move dropped the draw
+two plies later. The solver's scores pinpointed the exact two mistakes
+in real time, and its finish was the same stacked double every strong
+engine in this repo has used: a forced block directly beneath the
+winning square.
 
 The win reproduces against the stronger engine of this branch
 (transposition table + PVS + MTD(f), depth 13-17 at the same 2 s budget):
