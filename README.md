@@ -484,3 +484,38 @@ ply 18, while the threat evaluation turns negative from ply 12 on
 structure plies before it is provable. Each branch README carries the
 detailed numbers; `main` carries the strongest (combined) version while
 each step stays observable in its branch.
+
+## Credits
+
+This project builds on the work and ideas of others:
+
+* [Connect4](https://github.com/RainerZ/Connect4) by Rainer Zaiser — the
+  origin of this repo: a first Java/JavaFX practice project whose engine
+  evaluation (the signed line-count board score) is ported here 1:1 and
+  still forms the base layer of the evaluation.
+* [Pascal Pons' Connect 4 solver](https://github.com/PascalPons/connect4)
+  and his outstanding step-by-step
+  [solving tutorial](http://blog.gamesolver.org/) — the perfect 49-bit
+  position key used by the transposition table, the line protocol spoken
+  by the `--solver` seat, the ground truth behind `versus`, and the
+  source the opening book is distilled from. Play his solver online at
+  [connect4.gamesolver.org](https://connect4.gamesolver.org).
+* Victor Allis,
+  [*A Knowledge-Based Approach of Connect-Four*](https://web.archive.org/web/20161221134811/http://www.informatik.uni-trier.de/~fernau/DSL0607/Masterthesis-Viergewinnt.pdf)
+  (Master's thesis, Vrije Universiteit Amsterdam, 1988) — the threat and
+  zugzwang-parity theory behind the threat-aware evaluation; Allis (and
+  independently James D. Allen) first proved Connect Four a first-player
+  win.
+* Aske Plaat et al.,
+  [*Best-First Fixed-Depth Minimax Algorithms*](https://askeplaat.wordpress.com/534-2/mtdf-algorithm/)
+  — the MTD(f) algorithm driving the search; alpha-beta pruning and
+  principal variation search go back to Knuth & Moore and Marsland &
+  Campbell.
+* [egui/eframe](https://github.com/emilk/egui) by Emil Ernerfeldt — the
+  immediate-mode GUI the board is drawn with.
+* The [Model Context Protocol](https://modelcontextprotocol.io) — the
+  interface that lets LLMs sit down at the board.
+
+Development of the Rust port, the engine experiments and the games
+documented here: a collaboration between Rainer Zaiser and Anthropic's
+Claude (Fable 5) in [Claude Code](https://claude.com/claude-code).
