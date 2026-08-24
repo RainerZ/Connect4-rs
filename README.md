@@ -151,9 +151,14 @@ through (`--solver '/path/c4solver -w'` for the faster weak solver), and a
 automatically (the process runs in its own directory).
 
 Without the opening book the solver's first one or two moves solve
-nearly-empty boards from scratch, which can take minutes — the process is
-kept alive between moves, so once warmed up it answers instantly. If a
-solver query fails the built-in engine plays that move instead.
+nearly-empty boards from scratch — measured here: 6 min 47 s for the empty
+board (Apple Silicon), which incidentally reproduces the famous
+perfect-play result live: column scores `-2 -1 0 1 0 -1 -2`, only the
+centre opening wins. The process is kept alive between moves, so once
+warmed up it answers instantly; replayed midgame positions are answered
+immediately even bookless. The weak solver (`-w`) is several times
+faster if you want bookless games from scratch. If a solver query fails,
+the built-in engine plays that move instead.
 
 ### Control socket (`src/server.rs`)
 
