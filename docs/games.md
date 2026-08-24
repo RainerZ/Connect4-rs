@@ -101,3 +101,18 @@ execution ended with the signature stacked double: Claude's forced row-4
 block at c5r4 directly beneath the solver's diagonal win at c5r5. Solver
 think times fell from 101 s (first bookless query) to 0 ms as its
 kept-alive process warmed up.
+
+## 10 — combined engine + distilled book vs the perfect solver · **engine wins**, 41 plies
+
+```
+4,4,4,4,4,7,3,2,2,2,2,7,6,5,5,5,6,4,2,6,6,7,7,6,2,7,6,7,3,1,5,5,3,3,3,1,1,3,5,1,1
+```
+
+The finale: with a 6-move opening book distilled from the solver itself
+(6 525 positions, one solver verdict each), the engine beat the perfect
+solver as first player — at a 2 s budget, and again at 10 s (game:
+`4,4,4,4,4,7,3,2,2,2,2,7,2,7,7,6,6,6,6,7,4,7,2,1,6,6,1,1,1,1,1,3,5,5,3,3,3,3,5,5,5`).
+The solver's score after every engine move stayed at −1: the theoretical
+win was never dropped. Plies 13–25 were played by the unassisted 2 s
+heuristic — perfectly; from ply 25 the engine's own proofs took over and
+converted on stone 41, the latest a perfect defender can be beaten.

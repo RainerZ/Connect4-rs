@@ -163,8 +163,24 @@ the engine opens correctly and holds the first-player win for 4 plies; at
 10 s it talks itself into a theoretically losing b-file opening — deeper
 search amplifies the heuristic's opening misjudgment instead of fixing
 it. Beating the solver is not a think-time problem but an opening
-knowledge problem (a book distilled from the solver would be the natural
-next experiment).
+knowledge problem — which the `bookgen` binary solves: it distills an
+opening book from the solver itself (every first-player position down to
+six book moves, one solver verdict each, 6 525 entries after
+transposition dedup, ~40 min bookless):
+
+```bash
+cargo run --release --bin bookgen -- --solver /path/to/c4solver --plies 6
+```
+
+The result (`opening-book.txt`, in the repo) is consulted by the engine
+seat before searching (`--book <file>`, or automatically when
+`opening-book.txt` sits in the working directory) and played instantly as
+proven wins. **With the book, the engine beats the perfect solver as
+first player at a 2 s budget** — the solver's move-by-move verdict never
+leaves −1, the unassisted heuristic middlegame (plies 13–25) holds the
+unique win by itself, the engine's own proofs take over from ply 25 and
+convert on stone 41, the latest a perfect defender can be beaten
+(game 10 in [docs/games.md](docs/games.md)).
 
 Without the opening book the solver's first one or two moves solve
 nearly-empty boards from scratch — measured here: 6 min 47 s for the empty
@@ -378,7 +394,13 @@ played back without hints and proven fifteen plies out: the threat
 evaluation supplied the structure, the transposition-table search the
 proof and the flawless execution.
 
-Finally Claude played the perfect solver (`--solver`, game 9 in
+The engine, armed with a 6-move opening book distilled from the solver
+itself (`bookgen`), then beat the perfect solver as first player at a 2 s
+budget — holding the theoretical win over the full 41 plies: book
+(plies 1–11), unassisted heuristic (13–25, verdict never worse than −1),
+own proofs (25–41). Game 10 in [docs/games.md](docs/games.md).
+
+Earlier, Claude played the perfect solver (`--solver`, game 9 in
 [docs/games.md](docs/games.md)) — and perfection turned out to be the
 best teacher: Claude held the theoretical win for eight plies before a
 tempo-grabbing forcing move dropped it to a draw (the solver proved that
