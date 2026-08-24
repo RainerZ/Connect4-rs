@@ -28,8 +28,11 @@ the engine — more on that [below](#results-so-far).*
 
 ```bash
 cargo build --release
-cargo run --release          # you are red and start; the engine answers
+cargo run --release          # the GUI (the default binary); you are red and start
 ```
+
+(`cargo run` without `--bin` starts the GUI thanks to `default-run`; the
+other binaries are `--bin versus`, `--bin bookgen` and `connect4-mcp`.)
 
 Run from the repository root and the engine automatically loads the
 committed opening book (`opening book loaded: 6525 positions` on stderr)
