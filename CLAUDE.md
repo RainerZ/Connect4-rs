@@ -32,7 +32,10 @@ of writing: engine 6 – Claude 2.
   `{"cmd":"replay","moves":[...]}` on the socket — used to restore
   positions for screenshots or analysis. Historic games: `docs/games.md`.
 - Engine think time: `--budget <seconds>` (default 2), LLM hints default
-  on (`--no-hints` to disable).
+  on (`--no-hints` to disable). `--solver <cmd>` puts an external solver
+  (Pascal Pons line protocol) into the engine seat; Rainer's copy is at
+  /Users/rainer/git/connect4-pp/c4solver (no opening book - first moves
+  from a near-empty board take minutes, warm process afterwards instant).
 - Rainer pushes to GitHub himself; `git push` is not authenticated in
   non-interactive shells.
 

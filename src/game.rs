@@ -1,6 +1,7 @@
 //! Game state shared between GUI, engine thread and the control socket.
 
 use crate::engine::{Board, Piece, SearchStats, Searcher, TransTable, COLS, ROWS};
+use crate::solver::ExternalSolver;
 use crate::hints::{self, Hints};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Condvar, Mutex};
@@ -208,15 +209,18 @@ pub struct Shared {
     pub changed: Condvar,
     pub stats: SearchStats,
     pub repaint: Mutex<Option<eframe::egui::Context>>,
+    /// External solver command playing the engine seat (--solver).
+    pub solver: Option<String>,
 }
 
 impl Shared {
-    pub fn new(engine_starts: bool, budget: Duration, hints: bool) -> Arc<Shared> {
+    pub fn new(engine_starts: bool, budget: Duration, hints: bool, solver: Option<String>) -> Arc<Shared> {
         Arc::new(Shared {
             game: Mutex::new(Game::new(engine_starts, budget, hints, hints)),
             changed: Condvar::new(),
             stats: SearchStats::default(),
             repaint: Mutex::new(None),
+            solver,
         })
     }
 
@@ -227,20 +231,45 @@ impl Shared {
         }
     }
 
-    /// Engine thread body: whenever it is the engine's turn, search and play.
+    /// Engine thread body: whenever it is the engine's turn, search and play
+    /// - with the built-in engine, or an external solver in the engine seat.
     pub fn engine_loop(self: Arc<Self>) {
         raise_thread_priority();
         let mut tt = TransTable::new();
+        let mut solver = self.solver.clone().map(|spec| match ExternalSolver::spawn(&spec) {
+            Ok(s) => {
+                eprintln!("external solver in the engine seat: {}", s.path.display());
+                s
+            }
+            Err(e) => {
+                eprintln!("{e}");
+                std::process::exit(2);
+            }
+        });
         loop {
-            let (board, p, budget) = {
+            let (board, p, budget, history) = {
                 let mut g = self.game.lock().unwrap();
                 while g.status != Status::Thinking {
                     g = self.changed.wait(g).unwrap();
                 }
-                (g.board, g.engine(), g.budget)
+                (g.board, g.engine(), g.budget, g.history.clone())
             };
             let t0 = Instant::now();
-            let r = Searcher::best_move(&board, p, budget, &self.stats, &mut tt);
+            let r = if let Some(sv) = solver.as_mut() {
+                match sv.best_move(&history) {
+                    Ok((col, score)) => {
+                        // Depth reported as "solved to the end of the game".
+                        let remaining = COLS * ROWS - board.total();
+                        crate::engine::SearchResult { col: Some(col), score, depth: remaining, nodes: 0 }
+                    }
+                    Err(e) => {
+                        eprintln!("solver failed ({e}), falling back to the built-in engine for this move");
+                        Searcher::best_move(&board, p, budget, &self.stats, &mut tt)
+                    }
+                }
+            } else {
+                Searcher::best_move(&board, p, budget, &self.stats, &mut tt)
+            };
             let millis = t0.elapsed().as_millis();
             let mut g = self.game.lock().unwrap();
             // Make sure the game was not restarted meanwhile.

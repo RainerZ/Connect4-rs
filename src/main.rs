@@ -2,6 +2,7 @@ mod engine;
 mod game;
 mod hints;
 mod server;
+mod solver;
 
 use eframe::egui;
 use engine::{Piece, COLS, ROWS};
@@ -10,10 +11,11 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-/// Usage: connect4-rs [--budget <seconds>] [--no-hints]
-fn parse_args() -> (Duration, bool) {
+/// Usage: connect4-rs [--budget <seconds>] [--no-hints] [--solver <path>]
+fn parse_args() -> (Duration, bool, Option<String>) {
     let mut budget = DEFAULT_BUDGET;
     let mut hints = true;
+    let mut solver = None;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -29,9 +31,16 @@ fn parse_args() -> (Duration, bool) {
             }
             "--hints" => hints = true,
             "--no-hints" => hints = false,
+            "--solver" => match args.next() {
+                Some(p) => solver = Some(p),
+                None => {
+                    eprintln!("--solver needs a solver command, e.g. /path/to/c4solver");
+                    std::process::exit(2);
+                }
+            },
             "-h" | "--help" => {
                 println!(
-                    "usage: connect4-rs [--budget <seconds>] [--no-hints]\n  --budget, -b  think time per engine move in seconds (default {})\n  --no-hints    start with LLM hints (socket/MCP state) and the GUI hint rings off;\n                both can be re-enabled at runtime (checkboxes/H, hints command, MCP tool)",
+                    "usage: connect4-rs [--budget <seconds>] [--no-hints] [--solver <path>]\n  --budget, -b  think time per engine move in seconds (default {})\n  --no-hints    start with LLM hints (socket/MCP state) and the GUI hint rings off;\n                both can be re-enabled at runtime (checkboxes/H, hints command, MCP tool)\n  --solver      an external solver plays the engine seat (Pascal Pons' line\n                protocol); extra args allowed, e.g. --solver 'path/c4solver -w'.\n                A 7x6.book next to the binary is picked up automatically",
                     DEFAULT_BUDGET.as_secs_f64()
                 );
                 std::process::exit(0);
@@ -42,12 +51,13 @@ fn parse_args() -> (Duration, bool) {
             }
         }
     }
-    (budget, hints)
+    (budget, hints, solver)
 }
 
 fn main() -> eframe::Result {
-    let (budget, hints) = parse_args();
-    let shared = Shared::new(false, budget, hints);
+    let (budget, hints, solver) = parse_args();
+    let solver_active = solver.is_some();
+    let shared = Shared::new(false, budget, hints, solver);
     {
         let s = shared.clone();
         std::thread::Builder::new().name("engine".into()).stack_size(16 << 20).spawn(move || s.engine_loop()).unwrap();
@@ -57,7 +67,9 @@ fn main() -> eframe::Result {
         std::thread::Builder::new().name("server".into()).spawn(move || server::run(s)).unwrap();
     }
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([640.0, 640.0]).with_title("Connect4-rs"),
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([640.0, 640.0])
+            .with_title(if solver_active { "Connect4-rs vs external solver" } else { "Connect4-rs" }),
         ..Default::default()
     };
     eframe::run_native("Connect4-rs", options, Box::new(|cc| {

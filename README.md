@@ -122,11 +122,38 @@ Command line options (`connect4-rs --help`):
 | `--budget <seconds>`, `-b` | think time per engine move (default 2; `+`/`-` and the slider change it at runtime) |
 | `--no-hints` | start with the LLM hints *and* the GUI hint rings off (both re-enablable at runtime) |
 | `--hints` | the default: both on |
+| `--solver <cmd>` | an external solver plays the engine seat (see below) |
 
 ```bash
 cargo run --release -- --budget 5     # a stronger engine: 5 s per move
 cargo run --release -- --no-hints     # bare start: no hints anywhere
 ```
+
+### Playing against an external solver
+
+There is no UCI-style standard protocol for Connect Four, so `--solver`
+speaks the de-facto one: [Pascal Pons' solver](https://github.com/PascalPons/connect4)
+reads one position per line (the played columns as digits) and, in its
+`-a` analyze mode, answers with a score per column — positive = the side
+to move wins (higher = faster), negative = loses, 0 = draw. With
+
+```bash
+cargo run --release -- --solver /path/to/c4solver
+```
+
+the solver occupies the engine seat: GUI, hints, eval bar, MCP tools and
+game recording all work unchanged, you (or an LLM) just face a perfect
+opponent. The engine picks the solver's highest-scoring column
+(centre-first tie break); a positive score triggers the "forced win"
+banner — against the solver it is never bluffing. Extra arguments pass
+through (`--solver '/path/c4solver -w'` for the faster weak solver), and a
+`7x6.book` opening book placed next to the binary is picked up
+automatically (the process runs in its own directory).
+
+Without the opening book the solver's first one or two moves solve
+nearly-empty boards from scratch, which can take minutes — the process is
+kept alive between moves, so once warmed up it answers instantly. If a
+solver query fails the built-in engine plays that move instead.
 
 ### Control socket (`src/server.rs`)
 
