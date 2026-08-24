@@ -31,19 +31,26 @@ cargo build --release
 cargo run --release          # you are red and start; the engine answers
 ```
 
-Requires a Rust toolchain (edition 2024, i.e. Rust ≥ 1.85). Build in
-release mode — the engine is roughly 10× slower in debug.
+Run from the repository root and the engine automatically loads the
+committed opening book (`opening book loaded: 6525 positions` on stderr)
+— it then plays its first six moves as first player with solver-perfect
+knowledge. Requires a Rust toolchain (edition 2024, i.e. Rust ≥ 1.85).
+Build in release mode — the engine is roughly 10× slower in debug.
 
 ```
 src/
   engine.rs   bitboard + incremental evaluation + negamax search (no_std-style, no allocations)
   game.rs     game state shared by GUI, engine thread and control socket
+  book.rs     opening book lookup (distilled from a perfect solver, see bookgen)
   hints.rs    optional LLM assistance (tactical bookkeeping), not used by the engine
+  solver.rs   adapter for an external solver (Pascal Pons line protocol)
   server.rs   control socket on 127.0.0.1:4444 (newline-delimited JSON)
-  main.rs     egui/eframe GUI            -> binary `connect4-rs`
-  mcp.rs      MCP stdio server           -> binary `connect4-mcp`
+  main.rs     egui/eframe GUI                        -> binary `connect4-rs`
+  mcp.rs      MCP stdio server                       -> binary `connect4-mcp`
+  versus.rs   automated engine-vs-solver matches     -> binary `versus`
+  bookgen.rs  distills the opening book from a solver -> binary `bookgen`
 ```
-(both binaries land in `target/release/`)
+(all binaries land in `target/release/`)
 
 ## What's there
 
@@ -123,10 +130,12 @@ Command line options (`connect4-rs --help`):
 | `--no-hints` | start with the LLM hints *and* the GUI hint rings off (both re-enablable at runtime) |
 | `--hints` | the default: both on |
 | `--solver <cmd>` | an external solver plays the engine seat (see below) |
+| `--book <file>` | opening book for the engine seat; without the flag, `opening-book.txt` in the working directory is loaded automatically if present |
 
 ```bash
 cargo run --release -- --budget 5     # a stronger engine: 5 s per move
 cargo run --release -- --no-hints     # bare start: no hints anywhere
+cargo run --release -- --book my.txt  # explicit opening book (must load)
 ```
 
 ### Playing against an external solver
@@ -150,33 +159,44 @@ through (`--solver '/path/c4solver -w'` for the faster weak solver), and a
 `7x6.book` opening book placed next to the binary is picked up
 automatically (the process runs in its own directory).
 
-For automated engine-vs-solver matches there is a separate binary:
+### `versus` — automated engine-vs-solver matches
 
 ```bash
-cargo run --release --bin versus -- --solver /path/to/c4solver --budgets 2,10
+cargo run --release --bin versus -- --solver /path/to/c4solver --budgets 2,10 [--book opening-book.txt]
 ```
 
 plays one game per think-time budget (engine first; `--solver-starts` to
 swap) and uses the solver's raw score after every engine move as ground
-truth for when the engine lost the theoretical win. First results: at 2 s
-the engine opens correctly and holds the first-player win for 4 plies; at
-10 s it talks itself into a theoretically losing b-file opening — deeper
-search amplifies the heuristic's opening misjudgment instead of fixing
-it. Beating the solver is not a think-time problem but an opening
-knowledge problem — which the `bookgen` binary solves: it distills an
-opening book from the solver itself (every first-player position down to
-six book moves, one solver verdict each, 6 525 entries after
-transposition dedup, ~40 min bookless):
+truth for when the engine lost the theoretical win — every game ends with
+a verdict line ("theoretical win held to ply N") and the move list for
+`docs/games.md`. Bookless results: at 2 s the engine opens correctly and
+holds the first-player win for 4 plies; at 10 s it talks itself into a
+theoretically losing b-file opening — deeper search amplifies the
+heuristic's opening misjudgment instead of fixing it. Beating the solver
+is not a think-time problem but an opening knowledge problem, which leads
+to:
+
+### The opening book — distilled from the solver
+
+`bookgen` builds the book by interrogating the solver: starting from the
+empty board, the first player always plays the solver's best move, every
+opponent reply is expanded, and each first-player position down to six
+book moves gets one solver verdict (best column + score). Transpositions
+are deduplicated (19 608 raw positions → 6 525 entries), results are
+appended immediately so an interrupted run resumes, and the whole
+distillation took ~40 bookless minutes:
 
 ```bash
 cargo run --release --bin bookgen -- --solver /path/to/c4solver --plies 6
 ```
 
-The result (`opening-book.txt`, in the repo) is consulted by the engine
-seat before searching (`--book <file>`, or automatically when
-`opening-book.txt` sits in the working directory) and played instantly as
-proven wins. **With the book, the engine beats the perfect solver as
-first player at a 2 s budget** — the solver's move-by-move verdict never
+The result is `opening-book.txt`, committed in the repo: one line per
+position — 49-bit position key (hex), best column, raw solver score. The
+engine seat consults it before searching (`--book <file>`, or
+automatically when `opening-book.txt` sits in the working directory —
+both the GUI and `versus`) and plays hits instantly, reported as proven
+wins. **With the book, the engine beats the perfect solver as first
+player at a 2 s budget** — the solver's move-by-move verdict never
 leaves −1, the unassisted heuristic middlegame (plies 13–25) holds the
 unique win by itself, the engine's own proofs take over from ply 25 and
 convert on stone 41, the latest a perfect defender can be beaten
