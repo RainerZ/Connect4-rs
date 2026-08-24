@@ -44,12 +44,12 @@ impl ExternalSolver {
     }
 
     /// Ask the solver for the best column (0-based) in the position reached
-    /// by `history` (0-based columns). Also returns the solver's score for
-    /// that move from the solver's point of view, mapped onto our scale:
-    /// a proven win becomes WIN_SCORE (the GUI announces it), a proven loss
-    /// a mildly negative score (the solver plays on - the opponent may err),
-    /// a draw 0.
-    pub fn best_move(&mut self, history: &[usize]) -> Result<(usize, i32), String> {
+    /// by `history` (0-based columns). Returns the column, the solver's
+    /// score mapped onto our scale (a proven win becomes WIN_SCORE - the
+    /// GUI announces it - a proven loss a mildly negative score so the
+    /// seat plays on, a draw 0) and the raw solver score (positive: the
+    /// side to move wins, higher = faster; 0: draw; negative: loses).
+    pub fn best_move(&mut self, history: &[usize]) -> Result<(usize, i32, i32), String> {
         let line: String = history.iter().map(|c| char::from(b'1' + *c as u8)).collect();
         writeln!(self.stdin, "{line}").map_err(|e| format!("solver stdin: {e}"))?;
         self.stdin.flush().map_err(|e| format!("solver stdin: {e}"))?;
@@ -85,7 +85,7 @@ impl ExternalSolver {
             // the resign threshold.
             s * 10
         };
-        Ok((col, mapped))
+        Ok((col, mapped, s))
     }
 }
 

@@ -36,6 +36,9 @@ of writing: engine 6 – Claude 2.
   (Pascal Pons line protocol) into the engine seat; Rainer's copy is at
   /Users/rainer/git/connect4-pp/c4solver (no opening book - first moves
   from a near-empty board take minutes, warm process afterwards instant).
+- `cargo run --release --bin versus -- --solver <cmd> --budgets 2,10`
+  plays automated engine-vs-solver games; the solver's raw score after
+  each engine move is ground truth for when the theoretical win was lost.
 - Rainer pushes to GitHub himself; `git push` is not authenticated in
   non-interactive shells.
 

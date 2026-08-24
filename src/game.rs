@@ -257,7 +257,7 @@ impl Shared {
             let t0 = Instant::now();
             let r = if let Some(sv) = solver.as_mut() {
                 match sv.best_move(&history) {
-                    Ok((col, score)) => {
+                    Ok((col, score, _raw)) => {
                         // Depth reported as "solved to the end of the game".
                         let remaining = COLS * ROWS - board.total();
                         crate::engine::SearchResult { col: Some(col), score, depth: remaining, nodes: 0 }

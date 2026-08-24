@@ -150,6 +150,22 @@ through (`--solver '/path/c4solver -w'` for the faster weak solver), and a
 `7x6.book` opening book placed next to the binary is picked up
 automatically (the process runs in its own directory).
 
+For automated engine-vs-solver matches there is a separate binary:
+
+```bash
+cargo run --release --bin versus -- --solver /path/to/c4solver --budgets 2,10
+```
+
+plays one game per think-time budget (engine first; `--solver-starts` to
+swap) and uses the solver's raw score after every engine move as ground
+truth for when the engine lost the theoretical win. First results: at 2 s
+the engine opens correctly and holds the first-player win for 4 plies; at
+10 s it talks itself into a theoretically losing b-file opening — deeper
+search amplifies the heuristic's opening misjudgment instead of fixing
+it. Beating the solver is not a think-time problem but an opening
+knowledge problem (a book distilled from the solver would be the natural
+next experiment).
+
 Without the opening book the solver's first one or two moves solve
 nearly-empty boards from scratch — measured here: 6 min 47 s for the empty
 board (Apple Silicon), which incidentally reproduces the famous

@@ -16,6 +16,10 @@ path = "src/main.rs"
 name = "connect4-mcp"
 path = "src/mcp.rs"
 
+[[bin]]
+name = "versus"
+path = "src/versus.rs"
+
 [profile.release]
 opt-level = 3
 lto = "fat"
