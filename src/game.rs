@@ -137,6 +137,34 @@ impl Game {
         true
     }
 
+    /// Take back moves until one human move has been removed and the human
+    /// is to move again - after the engine's reply this is the last move
+    /// pair, after a lost/resigned game everything back to the human's
+    /// last decision, and while the engine thinks just the human's pending
+    /// move (the in-flight search result is discarded by the board-identity
+    /// check in the engine loop). Returns false if there is nothing to undo.
+    pub fn undo(&mut self) -> bool {
+        let mut hist = self.history.clone();
+        let mut popped_human = false;
+        while let Some(i) = hist.len().checked_sub(1) {
+            let side = if i % 2 == 0 { Piece::Red } else { Piece::Yellow };
+            hist.pop();
+            if side == self.human {
+                popped_human = true;
+                break;
+            }
+        }
+        if !popped_human {
+            return false;
+        }
+        let mut g = Game::new(self.engine_starts, self.budget, self.hints, self.show_hints);
+        for &c in &hist {
+            g.replay_move(c);
+        }
+        *self = g;
+        true
+    }
+
     /// Human move (0-based column). Returns false if illegal now.
     pub fn human_move(&mut self, col: usize) -> bool {
         if self.status != Status::HumanToMove || !self.board.can_play(col) {
@@ -349,6 +377,25 @@ mod tests {
         assert!(g.resigned);
         assert_eq!(g.status, Status::Won(WinnerJs::Human));
         assert!(g.message().contains("gives up"));
+    }
+
+    /// Undo removes the last move pair, or just the pending human move
+    /// while the engine is thinking.
+    #[test]
+    fn undo_restores_human_turn() {
+        let mut g = Game::new(false, Duration::from_secs(2), false, false);
+        assert!(!g.undo());
+        g.human_move(3);
+        g.apply_engine_result(&EngineMove { col: Some(3), score: 0, depth: 1, nodes: 0, millis: 0, book: false });
+        assert_eq!(g.history.len(), 2);
+        assert!(g.undo());
+        assert!(g.history.is_empty());
+        assert_eq!(g.status, Status::HumanToMove);
+        g.human_move(2);
+        assert_eq!(g.status, Status::Thinking);
+        assert!(g.undo());
+        assert!(g.history.is_empty());
+        assert_eq!(g.status, Status::HumanToMove);
     }
 
     /// A proven engine win is announced while the game continues.

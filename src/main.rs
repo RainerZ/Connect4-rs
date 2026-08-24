@@ -130,7 +130,8 @@ impl eframe::App for App {
         let ctx = ui.ctx().clone();
         let ctx = &ctx;
         // Keyboard: 1-7 drop piece, N / Space new game, S swap who starts + new game,
-        // +/- double/halve the think time, H toggle the hint rings (GUI only)
+        // U undo the last move pair, +/- double/halve the think time,
+        // H toggle the hint rings (GUI only)
         let mut changed = false;
         ctx.input(|i| {
             let mut g = self.shared.game.lock().unwrap();
@@ -157,6 +158,9 @@ impl eframe::App for App {
             }
             if i.key_pressed(egui::Key::H) {
                 g.show_hints = !g.show_hints;
+            }
+            if i.key_pressed(egui::Key::U) && g.undo() {
+                changed = true;
             }
         });
 
@@ -248,6 +252,9 @@ impl eframe::App for App {
                 if ui.button("New game").clicked() {
                     let (es, bud, h, sh) = (g.engine_starts, g.budget, g.hints, g.show_hints);
                     *g = game::Game::new(es, bud, h, sh);
+                    changed = true;
+                }
+                if ui.button("Undo").on_hover_text("Take back your last move (U)").clicked() && g.undo() {
                     changed = true;
                 }
                 let mut es = g.engine_starts;

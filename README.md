@@ -110,13 +110,15 @@ ring with an x = loses immediately. The rings are a GUI-only display and
 independent of the LLM hints in the socket/MCP state, so you can watch the
 rings while a model plays unaided (and vice versa); both default to on.
 
-A settings strip offers a New-game button, an "engine starts" checkbox
+A settings strip offers New-game and Undo buttons, an "engine starts" checkbox
 (applies to the next game), the hints toggle and a logarithmic think-time
 slider (0.05–60 s). A small eval bar in the status area shows red's share
 of the engine's last score: middle = balanced, full = proven win.
 
 Keys: `1`–`7` drop a piece, `N`/`Space` new game, `S` swap who starts (and
-start a new game), `+`/`-` double/halve the engine's think time, `H` toggle
+start a new game), `U` undo your last move (works after the engine's
+reply, after a lost game, and even while the engine is still thinking),
+`+`/`-` double/halve the engine's think time, `H` toggle
 the hint rings (GUI only; the LLM hints have their own checkbox and socket
 command, see below). The status line shows think time and hint state; while
 the engine thinks it shows the iteration depth and live node count,
