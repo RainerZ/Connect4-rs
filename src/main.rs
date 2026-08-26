@@ -33,6 +33,7 @@ fn parse_args() -> (Duration, bool, Option<String>, Option<String>) {
             }
             "--hints" => hints = true,
             "--no-hints" => hints = false,
+            "--log" => game::LOG.store(true, std::sync::atomic::Ordering::Relaxed),
             "--solver" => match args.next() {
                 Some(p) => solver = Some(p),
                 None => {
@@ -49,7 +50,7 @@ fn parse_args() -> (Duration, bool, Option<String>, Option<String>) {
             },
             "-h" | "--help" => {
                 println!(
-                    "usage: connect4-rs [--budget <seconds>] [--no-hints] [--solver <path>]\n  --budget, -b  think time per engine move in seconds (default {})\n  --no-hints    start with LLM hints (socket/MCP state) and the GUI hint rings off;\n                both can be re-enabled at runtime (checkboxes/H, hints command, MCP tool)\n  --solver      an external solver plays the engine seat (Pascal Pons' line\n                protocol); extra args allowed, e.g. --solver 'path/c4solver -w'.\n                A 7x6.book next to the binary is picked up automatically\n  --book        opening book for the engine seat (default: opening-book.txt\n                in the working directory if present; see the bookgen binary)",
+                    "usage: connect4-rs [--budget <seconds>] [--no-hints] [--solver <path>]\n  --budget, -b  think time per engine move in seconds (default {})\n  --no-hints    start with LLM hints (socket/MCP state) and the GUI hint rings off;\n                both can be re-enabled at runtime (checkboxes/H, hints command, MCP tool)\n  --solver      an external solver plays the engine seat (Pascal Pons' line\n                protocol); extra args allowed, e.g. --solver 'path/c4solver -w'.\n                A 7x6.book next to the binary is picked up automatically\n  --book        opening book for the engine seat (default: opening-book.txt\n                in the working directory if present; see the bookgen binary)\n  --log         trace every move to stderr: history, engine reply details\n                (book/search, score, depth, nodes, time) and the tactical\n                hints served to the (LLM) player",
                     DEFAULT_BUDGET.as_secs_f64()
                 );
                 std::process::exit(0);

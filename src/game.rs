@@ -5,8 +5,21 @@ use crate::book::Book;
 use crate::solver::ExternalSolver;
 use crate::hints::{self, Hints};
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
+
+/// --log: trace to stderr what each player sees and what the engine did.
+pub static LOG: AtomicBool = AtomicBool::new(false);
+
+#[inline]
+fn logging() -> bool {
+    LOG.load(Ordering::Relaxed)
+}
+
+fn fmt_cols(cols: &[usize]) -> String {
+    cols.iter().map(|c| (c + 1).to_string()).collect::<Vec<_>>().join(",")
+}
 
 /// Default think time per engine move.
 pub const DEFAULT_BUDGET: Duration = Duration::from_secs(2);
@@ -124,6 +137,26 @@ impl Game {
             self.to_move = p.other();
             self.status = if self.to_move == self.human { Status::HumanToMove } else { Status::Thinking };
         }
+        if logging() {
+            let side = if p == Piece::Red { "red" } else { "yellow" };
+            let seat = if p == self.human { "player" } else { "engine" };
+            eprintln!(
+                "log: ply {:2} {side}({seat}) col {}  score(eval red) {:5}  | history {}",
+                self.history.len(), col + 1, self.board.score_for(Piece::Red), fmt_cols(&self.history)
+            );
+            if matches!(self.status, Status::Won(_) | Status::Draw) {
+                eprintln!("log: game over: {}", self.message());
+            } else if self.status == Status::HumanToMove && self.hints {
+                // Exactly the tactical hints the (LLM) player will receive.
+                let h = crate::hints::compute(&self.board, self.to_move);
+                let rows: Vec<String> = h.next_row.iter().map(|r| r.map(|r| r.to_string()).unwrap_or("-".into())).collect();
+                let list = |v: &Vec<usize>| if v.is_empty() { "-".to_string() } else { fmt_cols(&v.iter().map(|c| c - 1).collect::<Vec<_>>()) };
+                eprintln!(
+                    "log: hints to player: next_row {}  win {}  must_block {}  losing {}",
+                    rows.join(","), list(&h.winning_moves), list(&h.must_block), list(&h.losing_moves)
+                );
+            }
+        }
     }
 
     /// Replay move (0-based column) for whichever side is to move, engine
@@ -157,10 +190,15 @@ impl Game {
         if !popped_human {
             return false;
         }
+        if logging() {
+            eprintln!("log: undo -> history {}", fmt_cols(&hist));
+        }
+        let was_logging = LOG.swap(false, Ordering::Relaxed);
         let mut g = Game::new(self.engine_starts, self.budget, self.hints, self.show_hints);
         for &c in &hist {
             g.replay_move(c);
         }
+        LOG.store(was_logging, Ordering::Relaxed);
         *self = g;
         true
     }
@@ -195,6 +233,16 @@ impl Game {
     /// Apply a finished engine search: resign on a proven loss, otherwise
     /// play the move. Factored out of the engine thread for testability.
     pub fn apply_engine_result(&mut self, r: &EngineMove) {
+        if logging()
+            && let Some(col) = r.col
+        {
+            eprintln!(
+                "log: engine reply: col {}  {}  score {:5}  depth {:2}  nodes {}  {} ms",
+                col + 1,
+                if r.book { "from BOOK (score/depth = own quarter-budget eval)" } else { "searched" },
+                r.score, r.depth, r.nodes, r.millis
+            );
+        }
         if let Some(col) = r.col {
             self.last_search = Some(LastSearch { col: col + 1, score: r.score, depth: r.depth, nodes: r.nodes, millis: r.millis, book: r.book });
             if r.score <= -crate::engine::WIN_SCORE {
@@ -202,6 +250,9 @@ impl Game {
                 // playing on to the bitter end.
                 self.resigned = true;
                 self.status = Status::Won(WinnerJs::Human);
+                if logging() {
+                    eprintln!("log: engine resigns (proven loss)");
+                }
             } else {
                 self.finish_move(col);
             }

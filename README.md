@@ -148,6 +148,7 @@ Command line options (`connect4-rs --help`):
 | `--hints` | the default: both on |
 | `--solver <cmd>` | an external solver plays the engine seat (see below) |
 | `--book <file>` | opening book for the engine seat; without the flag, `opening-book.txt` in the working directory is loaded automatically if present |
+| `--log` | trace every move to stderr: move + history, the engine's reply details (book or search, score, depth, nodes, time, resignations) and the tactical hints served to the (LLM) player |
 
 ```bash
 cargo run --release -- --budget 5     # a stronger engine: 5 s per move
