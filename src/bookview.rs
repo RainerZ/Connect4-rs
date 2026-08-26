@@ -2,6 +2,7 @@
 //!
 //!   cargo run --release --bin bookview -- 40820204182 80810204086 ...
 //!   cargo run --release --bin bookview -- 1,2,2
+//!   cargo run --release --bin bookview -- --replay 1,2,2
 //!
 //! Each argument is either a position key (hex, as found in the book
 //! files) or a move list (columns 1-7, optionally comma separated - only
@@ -9,7 +10,9 @@
 //! form the GUI/MCP uses, the side to move, a legal move history reaching
 //! the position (reconstructed by backtracking when a key is given), the
 //! book verdicts from opening-book.txt / corrective-book.txt if present,
-//! and a ready-to-paste replay command for the running GUI.
+//! and a ready-to-paste replay command for the running GUI; with --replay the
+//! position is pushed onto the GUI directly (if the engine is then to
+//! move, it answers - book hits instantly - and the reply is reported).
 
 #[allow(dead_code)]
 mod book;
@@ -18,6 +21,8 @@ mod engine;
 
 use book::Book;
 use engine::{Board, Piece, COLS, ROWS};
+use std::io::{BufRead, BufReader, Write};
+use std::net::TcpStream;
 
 /// Invert the 49-bit position key: per column the value is
 /// `mover_stones + 2^height`, so the highest set bit is the height and the
@@ -84,7 +89,34 @@ fn find_history(grid: &[[Option<Piece>; 6]; 7], heights: &mut [usize; 7], n: usi
     false
 }
 
-fn show(history: &[usize], books: &[(String, Book)]) {
+/// Push the position onto the running GUI and report what happened.
+fn replay_to_gui(history: &[usize]) {
+    let moves: Vec<String> = history.iter().map(|c| (c + 1).to_string()).collect();
+    let req = format!("{{\"cmd\":\"replay\",\"moves\":[{}]}}", moves.join(","));
+    let reply = (|| -> Result<serde_json::Value, String> {
+        let mut s = TcpStream::connect(("127.0.0.1", 4444)).map_err(|e| format!("GUI not reachable on port 4444 (is it running?): {e}"))?;
+        writeln!(s, "{req}").map_err(|e| e.to_string())?;
+        let mut line = String::new();
+        BufReader::new(s).read_line(&mut line).map_err(|e| e.to_string())?;
+        serde_json::from_str(&line).map_err(|e| e.to_string())
+    })();
+    match reply {
+        Ok(v) => {
+            let after: Vec<u64> = v["history"].as_array().map(|a| a.iter().filter_map(|m| m.as_u64()).collect()).unwrap_or_default();
+            print!("replayed onto the GUI");
+            if after.len() > history.len() {
+                print!("; engine answered col {}", after.last().unwrap());
+                if v["last_search"]["book"].as_bool() == Some(true) {
+                    print!(" (from book)");
+                }
+            }
+            println!(" - {}", v["message"].as_str().unwrap_or(""));
+        }
+        Err(e) => println!("replay failed: {e}"),
+    }
+}
+
+fn show(history: &[usize], books: &[(String, Book)], replay: bool) {
     let mut b = Board::new();
     let mut p = Piece::Red;
     for &c in history {
@@ -116,14 +148,20 @@ fn show(history: &[usize], books: &[(String, Book)]) {
     if !hit && !books.is_empty() {
         println!("book: no entry for this position");
     }
-    println!("replay: printf '{{\"cmd\":\"replay\",\"moves\":[{}]}}\\n' | nc 127.0.0.1 4444", hist1.join(","));
+    if replay {
+        replay_to_gui(history);
+    } else {
+        println!("replay: printf '{{\"cmd\":\"replay\",\"moves\":[{}]}}\\n' | nc 127.0.0.1 4444", hist1.join(","));
+    }
     println!();
 }
 
 fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    let replay = args.iter().any(|a| a == "--replay" || a == "-r");
+    args.retain(|a| a != "--replay" && a != "-r");
     if args.is_empty() {
-        eprintln!("usage: bookview <key-hex | moves like 1,2,2> ...");
+        eprintln!("usage: bookview [--replay] <key-hex | moves like 1,2,2> ...");
         std::process::exit(2);
     }
     let mut books = Vec::new();
@@ -137,7 +175,7 @@ fn main() {
         if !cleaned.is_empty() && cleaned.chars().all(|c| ('1'..='7').contains(&c)) {
             // A move list.
             let hist: Vec<usize> = cleaned.chars().map(|c| c as usize - '1' as usize).collect();
-            show(&hist, &books);
+            show(&hist, &books, replay);
         } else if let Ok(key) = u64::from_str_radix(&cleaned, 16) {
             match decode(key) {
                 Some((grid, mut heights, _)) => {
@@ -145,7 +183,7 @@ fn main() {
                     let mut hist = Vec::new();
                     if find_history(&grid, &mut heights, n, &mut hist) {
                         hist.reverse();
-                        show(&hist, &books);
+                        show(&hist, &books, replay);
                     } else {
                         eprintln!("{a}: no legal move sequence reaches this position");
                     }
