@@ -64,6 +64,7 @@ src/
   mcp.rs      MCP stdio server                       -> binary `connect4-mcp`
   versus.rs   automated engine-vs-solver matches     -> binary `versus`
   bookgen.rs  distills the opening book from a solver -> binary `bookgen`
+  bookview.rs decodes book keys/positions to ASCII    -> binary `bookview`
 ```
 (all binaries land in `target/release/`)
 
@@ -228,7 +229,20 @@ the mover's stones then encode ownership, and whose turn it is follows
 from the stone count. No two distinct positions share a key, and a full
 column's carry lands harmlessly in the guard bit. The same key drives the
 transposition table; the authoritative definitions are `Board::key` in
-`src/engine.rs` and the file parser in `src/book.rs`. The
+`src/engine.rs` and the file parser in `src/book.rs`.
+
+Keys are exactly invertible, and the `bookview` tool makes them readable:
+
+```bash
+cargo run --release --bin bookview -- 80810204086   # a key from a book file
+cargo run --release --bin bookview -- 1,2,2         # or a move list
+```
+
+prints the ASCII board, the side to move, a legal move history reaching
+the position (reconstructed by backtracking - transpositions may yield a
+different but equivalent one), the entries any present book files hold for
+it, and a ready-to-paste `replay` command that pushes the position onto
+the running GUI. The
 engine seat consults it before searching (`--book <file>`, or
 automatically when `opening-book.txt` sits in the working directory —
 both the GUI and `versus`). A book hit plays the book move, but is not
