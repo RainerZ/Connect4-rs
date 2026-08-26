@@ -42,8 +42,10 @@ of writing: engine 6 – Claude 2.
   With `--book opening-book.txt` (distilled from the solver by the
   bookgen binary, committed in the repo) the engine beats the perfect
   solver as first player at 2 s.
-- Rainer pushes to GitHub himself; `git push` is not authenticated in
-  non-interactive shells.
+- Rainer reviews and commits himself: leave changes uncommitted in the
+  working tree (say what changed and suggest a commit message). Do not
+  run `git commit`. `git push` is not authenticated in non-interactive
+  shells anyway.
 
 ## Code conventions
 

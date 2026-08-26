@@ -67,13 +67,26 @@ fn parse_args() -> (Duration, bool, Option<String>, Option<String>) {
 fn main() -> eframe::Result {
     let (budget, hints, solver, book) = parse_args();
     let solver_active = solver.is_some();
-    // An explicitly named book must load; the default one is best-effort.
+    // An explicitly named book must load; the default ones are best-effort:
+    // the engine-start book plus the corrective book, merged (their keys
+    // cannot collide - they cover different sides to move).
     let book = match &book {
         Some(p) => Some(book::Book::load(std::path::Path::new(p)).unwrap_or_else(|e| {
             eprintln!("{e}");
             std::process::exit(2);
         })),
-        None => book::Book::load(std::path::Path::new("opening-book.txt")).ok(),
+        None => {
+            let mut b = book::Book::load(std::path::Path::new("opening-book.txt")).ok();
+            if let Ok(text_b) = book::Book::load(std::path::Path::new("corrective-book.txt")) {
+                match &mut b {
+                    Some(b) => {
+                        let _ = b.merge(std::path::Path::new("corrective-book.txt"));
+                    }
+                    None => b = Some(text_b),
+                }
+            }
+            b
+        }
     };
     if let Some(b) = &book {
         eprintln!("opening book loaded: {} positions", b.len());

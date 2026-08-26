@@ -16,8 +16,17 @@ pub struct Book {
 
 impl Book {
     pub fn load(path: &Path) -> Result<Book, String> {
+        let mut b = Book { entries: HashMap::new() };
+        b.merge(path)?;
+        Ok(b)
+    }
+
+    /// Load a further book file into this one (later entries win on
+    /// duplicate keys - which cannot happen between the engine-start book
+    /// and the corrective book, as keys include the side to move).
+    pub fn merge(&mut self, path: &Path) -> Result<(), String> {
         let text = std::fs::read_to_string(path).map_err(|e| format!("cannot read book {}: {e}", path.display()))?;
-        let mut entries = HashMap::new();
+        let entries = &mut self.entries;
         for (n, line) in text.lines().enumerate() {
             let mut t = line.split_whitespace();
             let (Some(k), Some(c), Some(r)) = (t.next(), t.next(), t.next()) else {
@@ -31,7 +40,7 @@ impl Book {
             }
             entries.insert(key, (col - 1, raw));
         }
-        Ok(Book { entries })
+        Ok(())
     }
 
     pub fn len(&self) -> usize {

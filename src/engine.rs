@@ -542,6 +542,41 @@ impl<'a> Searcher<'a> {
         best
     }
 
+    /// Deterministic variant of `best_move`: the same iterative deepening
+    /// with MTD(f), but to a fixed maximum depth with no clock - so the
+    /// result depends only on the position (and table state), not timing.
+    /// Used by the corrective-book audit in `bookgen`.
+    #[allow(dead_code)]
+    pub fn best_move_to_depth(board: &Board, p: Piece, max_depth: usize, stats: &'a SearchStats, tt: &'a mut TransTable) -> SearchResult {
+        let mut b = *board;
+        let remaining = COLS * ROWS - b.total();
+        let mut s = Searcher {
+            max_depth: 1,
+            stats,
+            tt,
+            probes: 0,
+            key_hits: 0,
+            cut_hits: 0,
+            nodes: 0,
+            deadline: Instant::now() + Duration::from_secs(3600),
+            aborted: false,
+        };
+        let mut best = SearchResult { col: None, score: 0, depth: 0, nodes: 0 };
+        let mut first = None;
+        let mut guess = 0;
+        for depth in 1..=max_depth.min(remaining).max(1) {
+            s.max_depth = depth;
+            let (col, score) = s.mtdf(&mut b, p, guess, first);
+            guess = score;
+            best = SearchResult { col, score, depth, nodes: s.nodes };
+            first = col;
+            if score == WIN_SCORE || score == -WIN_SCORE {
+                break;
+            }
+        }
+        best
+    }
+
     /// Single full-window search to exactly `depth` (no time limit, no
     /// iterative deepening). Used by tests.
     #[cfg(test)]
