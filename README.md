@@ -231,6 +231,39 @@ column's carry lands harmlessly in the guard bit. The same key drives the
 transposition table; the authoritative definitions are `Board::key` in
 `src/engine.rs` and the file parser in `src/book.rs`.
 
+### The corrective book — the engine's early blind spots
+
+The engine-start book cannot help when the *human* moves first (its keys
+encode the side to move, and they all have the first player to move). The
+second seat gets a different kind of book: `bookgen --corrective <stones>`
+enumerates **every** position with up to that many stones and the engine
+(second player) to move — full width, since the engine controls neither
+the human's moves nor which of its own earlier replies led here. For each
+position the solver delivers the verdict, and the engine is audited with
+a deterministic fixed-depth version of its real search (`--depths 12,13`
+by default, matching what the 2 s budget reaches): only where it would
+throw away a win or a draw does the book get an entry — the shipped file
+is exactly the map of the engine's early blind spots, not opening theory.
+
+```bash
+cargo run --release --bin bookgen -- --solver /path/to/c4solver --corrective 3
+```
+
+The result is `corrective-book.txt`; the GUI auto-loads it alongside
+`opening-book.txt` (their keys cannot collide). The 3-stone pilot audited
+all 245 positions and found **50 corrections (20 %)** — 36 preserving a
+win, 14 a draw. Two are direct replies to a human opening (after `2` only
+c1 keeps the engine's win, after `6` only e1 — the engine's search
+prefers the centre and lets both slip), the rest are positions where the
+human's bad opening hands the engine a won game that only one unintuitive
+move keeps (after `1,2,2` only b3 wins; after `5,2,1` only f1; after
+`7,7,6` even the draw hangs on the f-column). A killed run loses
+nothing: corrections are flushed line by line,
+re-runs keep existing entries, and `--skip <n>` resumes the deterministic
+audit order. `scripts/validate_book.py` replays every entry onto the
+running GUI and checks the engine answers with the booked move, from the
+book.
+
 Keys are exactly invertible, and the `bookview` tool makes them readable:
 
 ```bash

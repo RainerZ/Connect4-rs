@@ -103,6 +103,11 @@ struct Corrective {
     sv: ExternalSolver,
     depths: Vec<usize>,
     seen: HashSet<u64>,
+    /// Keys already present in the output book (kept, not rewritten).
+    booked: HashSet<u64>,
+    /// Audits to skip (deterministic DFS order) when salvaging a killed run.
+    skip: usize,
+    audited: usize,
     stats: SearchStats,
     tt: TransTable,
     out: std::fs::File,
@@ -138,6 +143,10 @@ impl Corrective {
     }
 
     fn audit(&mut self, b: &Board, hist: &[usize], key: u64) {
+        self.audited += 1;
+        if self.audited <= self.skip {
+            return;
+        }
         let scores = self.sv.analyze(hist).expect("solver failed");
         let best = ExternalSolver::pick(&scores).expect("no playable column");
         let verdict = scores[best];
@@ -152,7 +161,7 @@ impl Corrective {
                     failed.push((d, col));
                 }
             }
-            if !failed.is_empty() {
+            if !failed.is_empty() && self.booked.insert(key) {
                 writeln!(self.out, "{key:x} {} {verdict}", best + 1).unwrap();
                 self.out.flush().unwrap();
             }
@@ -168,16 +177,32 @@ fn fmt_hist(h: &[usize]) -> String {
     h.iter().map(|c| (c + 1).to_string()).collect::<Vec<_>>().join(",")
 }
 
-fn run_corrective(cmd: &str, stones: usize, depths: Vec<usize>, out_path: &str) {
+fn run_corrective(cmd: &str, stones: usize, depths: Vec<usize>, out_path: &str, skip: usize) {
     let sv = ExternalSolver::spawn(cmd).unwrap_or_else(|e| {
         eprintln!("{e}");
         std::process::exit(2);
     });
-    let out = std::fs::OpenOptions::new().create(true).write(true).truncate(true).open(out_path).unwrap();
+    // Keep existing entries (a killed run's corrections stay valid); only
+    // new corrections are appended, duplicates suppressed.
+    let mut booked = HashSet::new();
+    if let Ok(text) = std::fs::read_to_string(out_path) {
+        for line in text.lines() {
+            if let Some(k) = line.split_whitespace().next()
+                && let Ok(key) = u64::from_str_radix(k, 16)
+            {
+                booked.insert(key);
+            }
+        }
+        eprintln!("keeping {} existing corrections", booked.len());
+    }
+    let out = std::fs::OpenOptions::new().create(true).append(true).open(out_path).unwrap();
     let mut g = Corrective {
         sv,
         depths,
         seen: HashSet::new(),
+        booked,
+        skip,
+        audited: 0,
         stats: SearchStats::default(),
         tt: TransTable::new(),
         out,
@@ -235,6 +260,7 @@ fn main() {
     let mut plies = 6usize;
     let mut out_path = None;
     let mut corrective = None;
+    let mut skip = 0usize;
     let mut depths = vec![12usize, 13];
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -242,6 +268,7 @@ fn main() {
             "--solver" => solver_cmd = args.next(),
             "--plies" => plies = args.next().and_then(|v| v.parse().ok()).unwrap_or(6),
             "--corrective" => corrective = args.next().and_then(|v| v.parse::<usize>().ok()),
+            "--skip" => skip = args.next().and_then(|v| v.parse().ok()).unwrap_or(0),
             "--depths" => {
                 depths = args.next().unwrap_or_default().split(',').filter_map(|d| d.parse().ok()).collect();
             }
@@ -261,7 +288,7 @@ fn main() {
     };
     if let Some(stones) = corrective {
         let out = out_path.unwrap_or_else(|| "corrective-book.txt".to_string());
-        run_corrective(&cmd, stones, depths, &out);
+        run_corrective(&cmd, stones, depths, &out, skip);
         return;
     }
     let out_path = out_path.unwrap_or_else(|| "opening-book.txt".to_string());

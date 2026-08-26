@@ -42,6 +42,14 @@ of writing: engine 6 – Claude 2.
   With `--book opening-book.txt` (distilled from the solver by the
   bookgen binary, committed in the repo) the engine beats the perfect
   solver as first player at 2 s.
+- `bookgen --corrective <stones>` audits every engine-to-move position
+  (human first) against the solver and books only the engine's mistakes
+  (corrective-book.txt, auto-loaded next to opening-book.txt). Killed
+  runs: entries survive, resume with --skip <n> (deterministic DFS audit
+  order). `bookview [--replay] <key|moves>` decodes keys to ASCII boards
+  and can push positions onto the GUI. `scripts/validate_book.py` checks
+  every corrective entry live against the running GUI. Books load at GUI
+  startup - restart after regenerating.
 - Rainer reviews and commits himself: leave changes uncommitted in the
   working tree (say what changed and suggest a commit message). Do not
   run `git commit`. `git push` is not authenticated in non-interactive
