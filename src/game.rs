@@ -1,4 +1,15 @@
 //! Game state shared between GUI, engine thread and the control socket.
+//!
+//! Threading model: three threads share one `Game` behind a mutex.
+//! * The **GUI thread** (egui) applies human moves and settings.
+//! * The **engine thread** (`Shared::engine_loop`) sleeps on a condvar
+//!   until `status == Thinking`, computes a reply *without* holding the
+//!   lock, then re-takes it to apply the move - guarding against the game
+//!   having been restarted/undone meanwhile by comparing bitboards.
+//! * The **socket thread(s)** (`server.rs`) apply remote moves and block
+//!   on the same condvar until the engine has answered, which is what
+//!   makes the MCP `connect4_move` tool synchronous for LLM players.
+//! `Shared::notify` wakes both the condvar waiters and the GUI repaint.
 
 use crate::engine::{Board, Piece, SearchStats, Searcher, TransTable, COLS, ROWS};
 use crate::book::Book;
@@ -232,6 +243,12 @@ impl Game {
 
     /// Apply a finished engine search: resign on a proven loss, otherwise
     /// play the move. Factored out of the engine thread for testability.
+    ///
+    /// The +-WIN_SCORE conventions land here: a score of -1000 is a
+    /// *proof* (heuristics are clamped below it), so playing on would be
+    /// theatre - the engine concedes. Its +1000 counterpart is surfaced to
+    /// the human as the "Engine sees a forced win!" banner via
+    /// `engine_sees_win` instead of silently steamrolling them.
     pub fn apply_engine_result(&mut self, r: &EngineMove) {
         if logging()
             && let Some(col) = r.col
@@ -319,8 +336,16 @@ impl Shared {
         }
     }
 
-    /// Engine thread body: whenever it is the engine's turn, search and play
-    /// - with the built-in engine, or an external solver in the engine seat.
+    /// Engine thread body: whenever it is the engine's turn, produce a
+    /// move. The engine seat is a three-stage cascade:
+    ///   1. **Opening book** (if loaded): position key hit -> play the
+    ///      distilled solver move instantly (a short quarter-budget search
+    ///      still runs, purely to show the engine's own evaluation).
+    ///   2. **External solver** (`--solver`): forward the move history to
+    ///      the child process speaking Pascal Pons' line protocol.
+    ///   3. **Own search**: `Searcher::best_move` with the time budget.
+    /// The transposition table lives here, across moves and games - warm
+    /// tables answer recurring positions instantly.
     pub fn engine_loop(self: Arc<Self>) {
         raise_thread_priority();
         let mut tt = TransTable::new();

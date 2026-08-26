@@ -105,7 +105,11 @@ fn main() {
                 b.make(col, to_move);
                 history.push(col);
                 // raw is from the solver's view before its move: negative =
-                // solver losing = engine still winning.
+                // solver losing = engine still winning. This is the
+                // measurement heart of the whole experiment: a perfect
+                // opponent doubles as ground truth, so the exact ply where
+                // the engine's play dropped the theoretical win (or draw)
+                // is read directly off this trace.
                 println!(
                     "ply {ply:2}  solver col {} raw {raw:3}            {:5} ms",
                     col + 1, t.elapsed().as_millis()

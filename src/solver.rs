@@ -17,6 +17,11 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 
+/// Pons' sentinel for "column full" in `-a` output. Real scores live in
+/// +-21: his convention is score = (43 - stones_when_winning) / 2, signed
+/// for the side to move - so bigger positive = faster win, more negative
+/// = sooner loss, 0 = draw. This distance encoding is why picking the
+/// maximum score makes the solver play fastest wins and slowest losses.
 const INVALID_MOVE: i32 = -1000;
 
 pub struct ExternalSolver {

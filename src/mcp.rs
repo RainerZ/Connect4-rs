@@ -1,6 +1,12 @@
 //! MCP (Model Context Protocol) stdio server exposing the running Connect4-rs
 //! GUI as tools. Talks to the GUI over the local control socket (port 4444).
 //! Hand-rolled JSON-RPC 2.0 - small enough not to need a framework.
+//!
+//! Architecture note: this binary is a thin *forwarder*, not a second
+//! engine host. The GUI owns the game, the engine and the socket; the MCP
+//! client (e.g. Claude Code) spawns this process per session, and every
+//! tool call becomes one socket round trip - so a human watching the GUI
+//! and an LLM playing through MCP always see the same live game.
 
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};

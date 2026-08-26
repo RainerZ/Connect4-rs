@@ -9,6 +9,12 @@
 //! the command line, or `{"cmd":"hints","on":bool}` on the socket) and only
 //! affect the JSON state returned to clients. The engine never uses them.
 //!
+//! The design premise, measured in this repo's games: an LLM loses mostly
+//! to *bookkeeping* slips (miscounted column heights, an overlooked
+//! vertical three), not to strategy. These hints remove exactly that class
+//! of error and nothing more, so games with hints measure a model's
+//! planning rather than its counting.
+//!
 //! Everything here is a one-ply tactical lookup on the bitboard:
 //!   * next free row per column,
 //!   * columns where the side to move wins immediately,

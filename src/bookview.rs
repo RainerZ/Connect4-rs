@@ -68,8 +68,15 @@ fn decode(key: u64) -> Option<([[Option<Piece>; 6]; 7], [usize; 7], Piece)> {
     Some((grid, heights, to_move))
 }
 
-/// Reconstruct a legal move sequence reaching the position by removing the
-/// last mover's stones from the top of columns, backtracking on dead ends.
+/// Reconstruct a legal move sequence reaching the position by *unmoving*:
+/// alternation dictates who made the last move, and that stone must be on
+/// top of some column - try each candidate, recurse on the remainder,
+/// backtrack on dead ends. Positions have many histories (transpositions);
+/// this returns the first one found, which is fine because every consumer
+/// (board display, book lookup, replay, solver) depends only on the
+/// resulting position, never on the path. Deliberately does not verify the
+/// "nobody had already won earlier" rule - book-derived keys are always
+/// live games.
 fn find_history(grid: &[[Option<Piece>; 6]; 7], heights: &mut [usize; 7], n: usize, out: &mut Vec<usize>) -> bool {
     if n == 0 {
         return true;

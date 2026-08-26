@@ -1,4 +1,8 @@
 //! Minimal control socket: one JSON object per line in, one JSON line out.
+//! This is the machine door into the running game - the MCP server, the
+//! bookview --replay push and any script speak it. `move` (and `replay`
+//! into an engine-to-move position) intentionally *block* until the engine
+//! has answered: for an LLM player one tool call = one full exchange.
 //! {"cmd":"state"} | {"cmd":"move","col":1..7} | {"cmd":"new","engine_starts":bool}
 //! {"cmd":"hints","on":bool}   toggles LLM assistance (see hints.rs)
 //! {"cmd":"replay","moves":[..]} replays a full game (both sides) into place

@@ -1,7 +1,40 @@
-//! Connect4 engine: bitboards, incremental board evaluation and negamax with
-//! alpha/beta pruning. Faithful port of the Java `Connect4AiPlayer` /
-//! `Connect4Board` evaluation semantics, but with O(1) make/unmake and an
-//! O(#lines-through-square) score update instead of a full re-scan.
+//! Connect4 engine: bitboards, incremental evaluation and a
+//! negamax/alpha-beta search with transposition table, principal variation
+//! search and MTD(f). This module is the instructive core of the repo -
+//! the pieces fit together like this:
+//!
+//! # Board representation
+//! Two `u64` bitboards (one per colour) hold the stones; 7 bits per
+//! column, one of them a guard bit so shift tricks never bleed between
+//! columns. Win detection is four shift/AND pairs (`has_won`), and the
+//! same layout yields Pascal Pons' perfect 49-bit position key (`key`)
+//! used by the transposition table and the opening books.
+//!
+//! # Evaluation (two layers, both incremental)
+//! 1. The original Java heuristic: each of the 69 possible four-in-a-row
+//!    *lines* contributes its signed stone count while only one colour
+//!    occupies it (`line_value`). "How many lines am I still building?"
+//! 2. Threat/parity knowledge from Victor Allis' 1988 thesis: a line with
+//!    three stones and one empty square is a *threat*; whether it will
+//!    ever convert depends on the zugzwang parity of its empty square and
+//!    on the other threats below it in the same column (`threat_value`,
+//!    `col_threat_value`).
+//! Both layers are maintained *incrementally* in `make`/`unmake`: a move
+//! touches at most 13 lines, so updating per-line counters beats
+//! re-scanning all 69 lines by an order of magnitude. A random-playout
+//! test compares against a full-scan reference to keep this honest.
+//!
+//! # Search (inside out)
+//! * `negamax` - depth-limited alpha/beta in negamax form ("my best score
+//!   is the negation of the opponent's"), with a transposition-table
+//!   probe/store and principal variation search (first child full window,
+//!   siblings zero window).
+//! * `mtdf` - converges on the exact minimax value with a sequence of
+//!   zero-window searches; zero windows make the stored TT bounds
+//!   maximally reusable.
+//! * `best_move` - iterative deepening driver on a wall-clock budget:
+//!   depth 1, 2, 3, ... each depth solved by MTD(f), previous results
+//!   seeding move ordering and the next value guess.
 //!
 //! No heap allocation in the per-node hot path: board state lives in
 //! fixed-size arrays; the only allocation is the transposition table, made
@@ -15,17 +48,32 @@ pub const ROWS: usize = 6;
 pub const WIN_SCORE: i32 = 1000;
 pub const INF: i32 = 1_000_000;
 
-/// Threat/parity evaluation (Allis): a line with three stones of one colour
-/// and one empty square is a threat on that square. Two pieces of Connect
-/// Four knowledge go into the value:
+/// Threat/parity evaluation, the central insight of Victor Allis' 1988
+/// thesis "A Knowledge-Based Approach of Connect-Four".
 ///
-/// * Parity: with normal zugzwang the first player (red) gets the odd rows
-///   (1, 3, 5), the second player the even rows, so a threat on the right
-///   parity is usually convertible and worth much more.
-/// * The lowest threat in a column dominates: threats above it only come
-///   alive after it resolves, so only the lowest threat square per column
-///   is scored (a square that is a threat for both sides goes to the side
-///   whose parity matches the row).
+/// A *threat* is a line with three stones of one colour and one empty
+/// square: whoever gets that square completes four. But threat squares
+/// high up a column cannot be taken at will - a stone can only be played
+/// on top of the current stack. So the question "who will eventually get
+/// this square?" is decided by *zugzwang*: late in the game the players
+/// are forced to fill the remaining columns move by move, and with 7
+/// columns x 6 rows = 42 squares and strict alternation, the first player
+/// (red) naturally receives the odd rows (1, 3, 5) and the second player
+/// the even rows - unless somebody sacrifices tempo.
+///
+/// Hence two pieces of knowledge make a threat valuable:
+///
+/// * **Parity**: a threat whose empty square lies on the "own" parity row
+///   (odd for red, even for yellow) is usually convertible via zugzwang
+///   and scores +-24; a wrong-parity threat still has forcing value (the
+///   opponent must respect it) but rarely converts, +-6.
+/// * **The lowest threat per column dominates**: if my threat square sits
+///   *below* yours in the same column, yours only becomes reachable after
+///   mine resolves - typically by me winning. So only the lowest threat
+///   square of each column is scored, and a square both sides threaten
+///   goes to the side whose parity matches its row. (This rule is what
+///   the engine's winning "frozen column" games are made of: park a
+///   threat under the opponent's and wait.)
 pub const THREAT_GOOD: i32 = 24;
 pub const THREAT_WEAK: i32 = 6;
 
@@ -39,8 +87,20 @@ fn threat_value(pi: usize, sq: usize) -> i32 {
     if pi == 0 { v } else { -v }
 }
 
-/// Bitboard layout: bit index = col * 7 + row  (7 bits per column, top bit is
-/// a guard so shifts never bleed into the next column).
+/// Bitboard layout: bit index = col * 7 + row (row 0 = bottom). Each
+/// column owns 7 bits although the board is only 6 high - the extra top
+/// bit is a *guard*: it is never occupied, so when `has_won` shifts the
+/// board by 1 (vertical) or the key encoding carries out of a full
+/// column, nothing spills into the neighbouring column's bits.
+///
+/// ```text
+///   bit index per cell        col:  0    1    2   ...
+///   row 5 (top)                     5   12   19
+///   ...                            ...
+///   row 1                           1    8   15
+///   row 0 (bottom)                  0    7   14
+///   (bit 6, 13, 20, ... are the unused guard bits)
+/// ```
 const COL_BITS: usize = ROWS + 1;
 const BOARD_MASK: u64 = {
     let mut m = 0u64;
@@ -63,10 +123,17 @@ const BOTTOM_MASK: u64 = {
     m
 };
 
-/// Column search order (centre first) - helps alpha/beta a lot.
+/// Column search order, centre first. Alpha/beta prunes best when the
+/// strongest move is tried first, and in Connect Four central columns
+/// intersect the most four-in-a-row lines (the centre cell lies on 13 of
+/// the 69, an edge cell on 3), so "centre first" is a free, surprisingly
+/// strong static move ordering.
 pub const COL_ORDER: [usize; COLS] = [3, 4, 2, 1, 5, 0, 6];
 
-/// Number of possible 4-in-a-row lines on a 7x6 board.
+/// Number of possible 4-in-a-row lines on a 7x6 board:
+/// 24 horizontal (4 windows x 6 rows), 21 vertical (3 windows x 7
+/// columns), 12 + 12 diagonals = 69. Everything the evaluation knows is
+/// phrased in terms of these lines.
 pub const NLINES: usize = 69;
 /// Maximum number of lines passing through a single square.
 const MAX_LINES_PER_SQ: usize = 13;
@@ -77,6 +144,11 @@ struct LineTables {
     line_squares: [[u8; 4]; NLINES],
 }
 
+/// Precompute, at compile time, (a) for every square the list of lines
+/// passing through it and (b) for every line its four squares. These two
+/// tables are what makes the evaluation incremental: when a stone lands
+/// on a square, only the lines of that square (at most 13) can change
+/// their value.
 const fn build_tables() -> LineTables {
     let mut sq_lines = [[0xFFu8; MAX_LINES_PER_SQ]; COLS * ROWS];
     let mut line_squares = [[0u8; 4]; NLINES];
@@ -154,8 +226,13 @@ impl Piece {
     }
 }
 
-/// Line value exactly as the Java `Line.value()`: sum of field values if only
-/// one colour is present in the line, otherwise 0.
+/// Line value exactly as the Java `Line.value()`: the signed stone count
+/// while the line belongs to one colour alone, 0 as soon as both colours
+/// appear (a "mixed" line can never become four-in-a-row, so it is dead
+/// and worth nothing). This is the classic cheap Connect Four heuristic:
+/// it rewards keeping many lines alive and progressing them, without any
+/// notion of *whether* a line can actually be completed - that deeper
+/// knowledge is layered on top by the threat evaluation.
 #[inline(always)]
 fn line_value(red: u8, yellow: u8) -> i32 {
     if yellow == 0 {
@@ -171,10 +248,13 @@ fn line_value(red: u8, yellow: u8) -> i32 {
 pub struct Board {
     /// bb[0] = red pieces, bb[1] = yellow pieces
     bb: [u64; 2],
-    /// number of pieces per column
+    /// Number of pieces per column = the row the next stone lands on.
     height: [u8; COLS],
     total: u8,
-    /// per line: number of red / yellow pieces
+    /// Per line: number of red / yellow stones. This little table is the
+    /// heart of the incremental evaluation - from it, a line's value and
+    /// its threat status can be read off in O(1) whenever a move touches
+    /// the line.
     counts: [[u8; 2]; NLINES],
     /// Sum of all line values (red positive). Identical to the Java
     /// `getBoardScore(board, +1)` unless a line is complete.
@@ -242,10 +322,14 @@ impl Board {
         self.threats
     }
 
-    /// Value of a column's threats: the lowest threat square decides, its
-    /// owner (parity decides squares shared by both sides) collects the
-    /// parity-weighted value. Threats above the lowest one count nothing -
-    /// they only come alive once it resolves.
+    /// Value of a column's threats - the "lowest threat dominates" rule.
+    /// Scanning bottom-up, the first square any side threatens decides the
+    /// whole column: its owner collects the parity-weighted value, and
+    /// everything above contributes nothing, because those squares only
+    /// become playable after the lower threat resolves (usually by
+    /// someone winning). A square threatened by *both* sides is awarded to
+    /// the side whose zugzwang parity matches its row - that side expects
+    /// to be handed the square in the endgame filling.
     fn col_threat_value(&self, col: usize) -> i32 {
         for r in 0..ROWS {
             let sq = col * ROWS + r;
@@ -289,7 +373,15 @@ impl Board {
         unreachable!()
     }
 
-    /// Drop a piece. Caller must ensure `can_play(col)`.
+    /// Drop a piece and update both evaluation layers incrementally.
+    /// Caller must ensure `can_play(col)`.
+    ///
+    /// The discipline: for each of the <= 13 lines through the landing
+    /// square, compare the line's value before and after the stone count
+    /// changes and add the difference to the running total - never rescan.
+    /// The same loop detects *threat transitions* from the line value it
+    /// already computed (see the comment inside), so the second layer
+    /// costs the common path only two integer compares.
     #[inline(always)]
     pub fn make(&mut self, col: usize, p: Piece) {
         let row = self.height[col] as usize;
@@ -309,10 +401,17 @@ impl Board {
             c[pi] += 1;
             delta += line_value(c[0], c[1]) - before;
             // Threat transitions, detected on the signed line value already
-            // in hand (rare; the common path costs two compares): reaching
-            // three of a colour gains a threat on the remaining empty
-            // square, completing to four or getting blocked loses the
-            // threat whose empty square was sq itself.
+            // in hand (rare; the common path costs two compares). Reading
+            // `signed` as "the line value from the mover's point of view":
+            //   signed == 2  -> the mover just made it 3-of-a-kind: a new
+            //                   threat is born on the line's one remaining
+            //                   empty square (found by scanning its 4 squares);
+            //   signed == 3  -> the mover completed the line to four: the
+            //                   threat it *was* is consumed - and its empty
+            //                   square was exactly the square being played;
+            //   signed == -3 -> the mover just blocked an opponent threat:
+            //                   same square logic, opposite owner.
+            // Every other value means no threat appeared or disappeared.
             let signed = if pi == 0 { before } else { -before };
             if signed == 2 {
                 let esq = self.line_empty_sq(l, usize::MAX);
@@ -326,7 +425,11 @@ impl Board {
         self.score += delta;
     }
 
-    /// Undo the last piece dropped into `col` (must be of colour `p`).
+    /// Undo the last piece dropped into `col` (must be of colour `p`) -
+    /// the exact mirror of `make`, so search can explore a move and take
+    /// it back in O(lines through the square). The threat transitions are
+    /// detected on the *after* value here, because unmake's after-state is
+    /// make's before-state.
     #[inline(always)]
     pub fn unmake(&mut self, col: usize, p: Piece) {
         self.height[col] -= 1;
@@ -363,7 +466,15 @@ impl Board {
         self.score += delta;
     }
 
-    /// True if `p` has four in a row.
+    /// True if `p` has four in a row - branch-free bitboard classic.
+    ///
+    /// For each direction d (vertical: 1 bit, horizontal: 7 = one column
+    /// width, diagonals: 6 and 8), `m = b & (b >> d)` marks every stone
+    /// that has a same-colour neighbour d steps away, i.e. every pair;
+    /// `m & (m >> 2d)` then marks a pair whose start is 2d away from
+    /// another pair's start - four in a row. The per-column guard bit
+    /// guarantees the shifts cannot manufacture a "pair" across the seam
+    /// between two columns.
     #[inline(always)]
     pub fn has_won(&self, p: Piece) -> bool {
         let b = self.bb[p.idx()];
@@ -400,7 +511,11 @@ impl Board {
 
     /// Board score for player `p`: +-WIN_SCORE if a line is complete,
     /// otherwise the Java line-value sum plus the parity-weighted threat
-    /// values, clamped so a heuristic score can never look like a win.
+    /// values. The heuristic part is clamped strictly below WIN_SCORE - an
+    /// invariant the search relies on: a score of exactly +-1000 always
+    /// means a *proven* win/loss, which drives the forced-win banner, the
+    /// engine's resignation, and the early exit of iterative deepening.
+    /// (Negamax convention: the score is from `p`'s own point of view.)
     #[inline(always)]
     pub fn score_for(&self, p: Piece) -> i32 {
         if self.has_won(Piece::Red) {
@@ -413,10 +528,22 @@ impl Board {
     }
 
     /// Unique 49-bit position key for the side to move (Pascal Pons'
-    /// encoding): stones of the mover + occupancy + one bit per column. The
-    /// carry of `mask + bottom` marks each column's stack top, which encodes
-    /// the heights; the mover's stones encode ownership. The per-column
-    /// guard bit absorbs the carry of a full column.
+    /// encoding):
+    ///
+    /// ```text
+    ///   key = stones(mover) + occupancy + bottom
+    /// ```
+    ///
+    /// Why this is collision-free: within each 7-bit column,
+    /// `occupancy + bottom_bit` is a chain of carries that leaves a single
+    /// 1 exactly *on top* of the stack - so the highest set bit of a
+    /// column's key value is its height, and the bits below it are the
+    /// mover's stones (the opponent's are the occupied rest). Height,
+    /// ownership and (via total stone count) the side to move are all
+    /// recoverable, hence the mapping is invertible - `bookview` does
+    /// exactly that inversion. The per-column guard bit absorbs the carry
+    /// of a full column. Used by the transposition table and as the line
+    /// format of the opening/corrective books.
     #[inline(always)]
     pub fn key(&self, to_move: Piece) -> u64 {
         self.bb[to_move.idx()] + (self.bb[0] | self.bb[1]) + BOTTOM_MASK
@@ -429,8 +556,16 @@ impl Board {
 
 /// Transposition table entry (16 bytes): the full key (no collisions), the
 /// score from the mover's point of view, the searched depth below the node
-/// and what kind of alpha/beta bound the score is, plus the best column for
-/// move ordering.
+/// and what kind of alpha/beta bound the score is, plus the best column
+/// for move ordering.
+///
+/// Why *bounds* and not just scores: alpha/beta rarely computes exact
+/// values. A node that failed high only proved "score >= x" (TT_LOWER: the
+/// search was cut off - the truth may be even better); a node where no
+/// child beat alpha only proved "score <= x" (TT_UPPER); only a score that
+/// landed strictly inside the window is exact (TT_EXACT). On probe, a
+/// bound is usable when it already decides the current window - e.g. a
+/// lower bound >= beta re-triggers the same cutoff without any search.
 #[derive(Clone, Copy, Default)]
 struct TtEntry {
     key: u64,
@@ -445,9 +580,18 @@ const TT_LOWER: u8 = 1;
 const TT_UPPER: u8 = 2;
 
 /// Transposition table: memoizes search results so positions reached by
-/// different move orders (transpositions) are searched once. Sized 2^22
-/// entries (64 MB); always-replace on store. An entry with key 0 is empty
-/// (a real key is never 0 thanks to BOTTOM_MASK).
+/// different move orders (transpositions) are searched once. The game tree
+/// is really a graph - red d1/yellow b1/red e1 meets red e1/yellow b1/red
+/// d1 - and without a table each such meeting point is searched from
+/// scratch every time.
+///
+/// Sized 2^22 entries (64 MB), indexed by the low key bits, verified by
+/// the full key; always-replace on store (simplest scheme, and measured
+/// good enough here). An entry with key 0 is empty (a real key is never 0
+/// thanks to BOTTOM_MASK). Note from this repo's own measurements: with
+/// wide search windows the table alone bought only ~5 % - it is the
+/// combination with zero-window search (PVS + MTD(f)) that makes the
+/// stored bounds constantly reusable.
 pub struct TransTable {
     entries: Vec<TtEntry>,
 }
@@ -506,11 +650,22 @@ pub struct Searcher<'a> {
 }
 
 impl<'a> Searcher<'a> {
-    /// Compute the best move for `p` on `board` using iterative deepening
-    /// within roughly `budget` wall-clock time. A new iteration is only
-    /// started while less than a third of the budget is used (the last
-    /// iteration dominates the cost); an iteration running past 2x the
-    /// budget is aborted.
+    /// Compute the best move for `p` on `board`: the top-level driver.
+    ///
+    /// Iterative deepening - searching depth 1, 2, 3, ... instead of one
+    /// deep search - looks wasteful but is nearly free (each iteration
+    /// costs ~2-4x the previous, so the shallow ones sum to a fraction of
+    /// the last) and pays twice: the previous iteration's best column is
+    /// tried first (dramatically better pruning), and its score seeds the
+    /// next MTD(f) guess. It also gives clean time control: the result is
+    /// always the deepest *completed* iteration.
+    ///
+    /// Budget rules: a new iteration only starts while less than a third
+    /// of the budget is spent ("don't start what you can't finish" - the
+    /// final iteration dominates the cost); a runaway iteration is aborted
+    /// at 2x the budget and its partial result discarded. Deepening also
+    /// stops on a proven win/loss (deeper search cannot change a proof)
+    /// and when the remaining game is fully searched.
     pub fn best_move(board: &Board, p: Piece, budget: Duration, stats: &'a SearchStats, tt: &'a mut TransTable) -> SearchResult {
         let mut b = *board;
         let t0 = Instant::now();
@@ -598,7 +753,9 @@ impl<'a> Searcher<'a> {
 
     /// Zero-window search [beta-1, beta] over the root moves. Returns the
     /// fail-soft score and the best column (the proving move on a fail
-    /// high, otherwise the move with the highest bound).
+    /// high, otherwise the move with the highest bound). "Fail-soft" means
+    /// returning the actual best value found even when it falls outside
+    /// the window - a tighter bound for the caller than clamping would be.
     fn zero_window_root(&mut self, b: &mut Board, p: Piece, beta: i32, first: Option<usize>) -> (Option<usize>, i32) {
         let mut s_max = -INF;
         let mut c_max = None;
@@ -623,10 +780,20 @@ impl<'a> Searcher<'a> {
         (c_max, s_max)
     }
 
-    /// MTD(f): converge on the minimax value with a sequence of zero-window
-    /// searches around `guess`. Zero windows keep the transposition table
-    /// bounds maximally reusable; with a good guess (previous iteration's
-    /// score) it converges in a few passes.
+    /// MTD(f) (Plaat et al.): find the exact minimax value using *only*
+    /// zero-window searches. A zero-window search [beta-1, beta] is a
+    /// cheap yes/no question - "is the true value >= beta?" - that fails
+    /// either high (answer >= beta, a lower bound) or low (an upper
+    /// bound). MTD(f) plays twenty-questions: start at `guess`, ask, use
+    /// the answer to tighten a [lo, hi] bracket, re-ask at the new edge,
+    /// until lo meets hi - typically 2-4 passes when the guess comes from
+    /// the previous iteration.
+    ///
+    /// The payoff is synergy with the transposition table: every stored
+    /// bound comes from the same kind of narrow window, so later passes
+    /// (and later iterations) constantly re-hit usable entries. This
+    /// combination is what doubled this engine's effective search speed -
+    /// the table alone barely helped (see TransTable docs).
     fn mtdf(&mut self, b: &mut Board, p: Piece, mut guess: i32, first: Option<usize>) -> (Option<usize>, i32) {
         let (mut lo, mut hi) = (-INF, INF);
         let mut best = first;
@@ -682,6 +849,20 @@ impl<'a> Searcher<'a> {
         (c_max, s_max)
     }
 
+    /// The heart of the search: depth-limited alpha/beta in *negamax*
+    /// form. Negamax exploits the zero-sum symmetry min(a,b) = -max(-a,-b)
+    /// so both players run the same maximizing code: every position is
+    /// scored from the side to move's view, and a child's result comes
+    /// back negated - "my best is the negation of your best reply". The
+    /// [alpha, beta] window travels along as (-beta, -alpha) for the same
+    /// reason: my lower bound is your upper bound, negated.
+    ///
+    /// alpha = best score I can already guarantee (raise it as children
+    /// improve); beta = best the opponent will allow (inherited); once
+    /// alpha passes beta the opponent would never steer into this node, so
+    /// the remaining children are skipped - the *beta cutoff* that gives
+    /// alpha/beta its power, and the reason move ordering (TT best move,
+    /// centre-first) matters so much.
     #[inline]
     fn negamax(&mut self, b: &mut Board, p: Piece, depth: usize, mut alpha: i32, beta: i32) -> i32 {
         self.nodes += 1;
@@ -699,9 +880,15 @@ impl<'a> Searcher<'a> {
             return s;
         }
 
-        // Transposition table probe: reuse the score of an at least as deep
-        // search of this position if its bound allows, and remember the best
-        // column for move ordering either way.
+        // Transposition table probe. A stored result is reusable when it
+        // searched at least as deep below this position as we are about to
+        // (in Connect Four the stone count fixes the ply, so "same
+        // position" also means "same distance from the root" - entries
+        // from deeper *iterations* are the ones with more depth). Then:
+        // exact score -> done; lower bound >= beta -> the cutoff happens
+        // again without searching; upper bound <= alpha -> hopeless here
+        // too; otherwise the bound still narrows the window. Even a
+        // too-shallow entry contributes its best column for move ordering.
         let remaining = (self.max_depth - depth) as u8;
         let key = b.key(p);
         let idx = self.tt.idx(key);
@@ -738,11 +925,17 @@ impl<'a> Searcher<'a> {
         }
         let alpha0 = alpha;
 
-        // Principal variation search: the first (best-ordered) child gets
-        // the full window, the rest a zero-width window - almost always a
-        // cheap refutation, re-searched with the full window when it
-        // unexpectedly improves alpha. Null-window results are pure bounds,
-        // which is also what makes the transposition table effective.
+        // Principal variation search. Bet on the move ordering: the first
+        // (best-ordered) child is searched with the full window and is
+        // expected to be the best; every sibling then only gets the
+        // zero-width question "are you better than what we have?"
+        // [alpha, alpha+1] - much cheaper, because narrow windows cut
+        // early everywhere below. When a sibling surprisingly answers
+        // "yes" (score lands in (alpha, beta)), the bet is lost and that
+        // child is re-searched with the honest window. Zero-window
+        // results are pure bounds - exactly the currency the transposition
+        // table trades in, which is why PVS and the TT reinforce each
+        // other.
         let mut s_max = -INF;
         let mut best_c = 0;
         let order = tt_col.into_iter().chain(COL_ORDER.iter().copied().filter(|&c| Some(c) != tt_col));
@@ -776,7 +969,11 @@ impl<'a> Searcher<'a> {
             }
         }
 
-        // Store fail-soft result with its bound type; always replace.
+        // Store the fail-soft result with its bound type (classified
+        // against the window this node actually searched): score below the
+        // original alpha -> we only proved an upper bound; score past beta
+        // -> only a lower bound (cutoff); in between -> exact. Always
+        // replace - simple, and good enough at this table size.
         let flag = if s_max <= alpha0 {
             TT_UPPER
         } else if s_max > beta {
