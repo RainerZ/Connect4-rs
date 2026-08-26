@@ -208,7 +208,26 @@ cargo run --release --bin bookgen -- --solver /path/to/c4solver --plies 6
 ```
 
 The result is `opening-book.txt`, committed in the repo: one line per
-position — 49-bit position key (hex), best column, raw solver score. The
+position — position key (hex), best column (1–7), raw solver score.
+
+The key is Pascal Pons' perfect 49-bit position encoding, computed from
+the two bitboards (bit index = `column·7 + row`, row 0 = bottom row,
+columns left to right; bit 6 of every column is a guard bit that never
+holds a stone):
+
+```
+key = stones(side to move) + occupancy + bottom
+```
+
+where `occupancy` is all stones of both colours and `bottom` has one bit
+set at row 0 of every column (0x40810204081 — also the key of the empty
+board). Adding `occupancy + bottom` produces a carry that leaves a 1
+exactly on top of each column's stack, which encodes every column height;
+the mover's stones then encode ownership, and whose turn it is follows
+from the stone count. No two distinct positions share a key, and a full
+column's carry lands harmlessly in the guard bit. The same key drives the
+transposition table; the authoritative definitions are `Board::key` in
+`src/engine.rs` and the file parser in `src/book.rs`. The
 engine seat consults it before searching (`--book <file>`, or
 automatically when `opening-book.txt` sits in the working directory —
 both the GUI and `versus`). A book hit plays the book move, but is not
