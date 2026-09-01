@@ -89,6 +89,12 @@ impl ExternalSolver {
             .ok_or_else(|| "no playable column".to_string())
     }
 
+    /// Child process id - lets the learn feature abort a long-running
+    /// query from outside (killing the solver makes the pending read fail).
+    pub fn pid(&self) -> u32 {
+        self.child.id()
+    }
+
     pub fn best_move(&mut self, history: &[usize]) -> Result<(usize, i32, i32), String> {
         let scores = self.analyze(history)?;
         let col = Self::pick(&scores)?;

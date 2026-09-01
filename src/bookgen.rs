@@ -102,7 +102,13 @@ struct Audit {
 struct Corrective {
     sv: ExternalSolver,
     depths: Vec<usize>,
+    /// Positions already audited - pre-loaded from the audit log
+    /// (corrective-audited.txt), so a continued or deeper run only pays
+    /// for positions never seen before, plus in-run transposition dedupe.
     seen: HashSet<u64>,
+    /// Append-only log of every audited position key; the durable resume
+    /// state (--skip remains as a coarser fallback within one run).
+    audit_log: std::fs::File,
     /// Keys already present in the output book (kept, not rewritten).
     booked: HashSet<u64>,
     /// Audits to skip (deterministic DFS order) when salvaging a killed run.
@@ -147,6 +153,8 @@ impl Corrective {
         if self.audited <= self.skip {
             return;
         }
+        writeln!(self.audit_log, "{key:x}").unwrap();
+        self.audit_log.flush().unwrap();
         let scores = self.sv.analyze(hist).expect("solver failed");
         let best = ExternalSolver::pick(&scores).expect("no playable column");
         let verdict = scores[best];
@@ -196,10 +204,23 @@ fn run_corrective(cmd: &str, stones: usize, depths: Vec<usize>, out_path: &str, 
         eprintln!("keeping {} existing corrections", booked.len());
     }
     let out = std::fs::OpenOptions::new().create(true).append(true).open(out_path).unwrap();
+    // The audit log is the durable resume state: every position ever
+    // audited (in any earlier or shallower run) is skipped up front.
+    let mut seen = HashSet::new();
+    if let Ok(text) = std::fs::read_to_string("corrective-audited.txt") {
+        for line in text.lines() {
+            if let Ok(key) = u64::from_str_radix(line.trim(), 16) {
+                seen.insert(key);
+            }
+        }
+        eprintln!("skipping {} already audited positions", seen.len());
+    }
+    let audit_log = std::fs::OpenOptions::new().create(true).append(true).open("corrective-audited.txt").unwrap();
     let mut g = Corrective {
         sv,
         depths,
-        seen: HashSet::new(),
+        seen,
+        audit_log,
         booked,
         skip,
         audited: 0,

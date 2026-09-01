@@ -6,6 +6,8 @@
 //! {"cmd":"state"} | {"cmd":"move","col":1..7} | {"cmd":"new","engine_starts":bool}
 //! {"cmd":"hints","on":bool}   toggles LLM assistance (see hints.rs)
 //! {"cmd":"replay","moves":[..]} replays a full game (both sides) into place
+//! {"cmd":"learn","solver":"..."} books the engine's mistakes in the current
+//!   game (solver optional if --tutor / C4_SOLVER / --solver is configured)
 //! `move` blocks until the engine has answered (or the game ended).
 
 use crate::game::{Game, Shared, Status, PORT};
@@ -106,6 +108,18 @@ fn execute(shared: &Shared, req: &Value) -> Value {
             shared.notify();
             wait_engine(shared);
             json!(shared.game.lock().unwrap().to_json())
+        }
+        Some("learn") => {
+            let (history, engine_side) = {
+                let g = shared.game.lock().unwrap();
+                (g.history.clone(), g.engine())
+            };
+            let cmd = req.get("solver").and_then(Value::as_str).map(String::from).or_else(|| shared.tutor.clone());
+            let Some(cmd) = cmd else {
+                return json!({"error": "no solver: pass \"solver\" or start with --tutor"});
+            };
+            let report = crate::learn::learn_from(&history, engine_side, &cmd, &shared.book, &|_| {}, &|_| {}, &|| false);
+            json!({"report": report})
         }
         Some("hints") => {
             let mut g = shared.game.lock().unwrap();

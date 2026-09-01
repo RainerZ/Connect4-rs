@@ -2,6 +2,7 @@ mod engine;
 mod game;
 mod book;
 mod hints;
+mod learn;
 mod server;
 mod solver;
 
@@ -13,11 +14,12 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// Usage: connect4-rs [--budget <seconds>] [--no-hints] [--solver <path>] [--book <file>]
-fn parse_args() -> (Duration, bool, Option<String>, Option<String>) {
+fn parse_args() -> (Duration, bool, Option<String>, Option<String>, Option<String>) {
     let mut budget = DEFAULT_BUDGET;
     let mut hints = true;
     let mut solver = None;
     let mut book = None;
+    let mut tutor = None;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -41,6 +43,7 @@ fn parse_args() -> (Duration, bool, Option<String>, Option<String>) {
                     std::process::exit(2);
                 }
             },
+            "--tutor" => tutor = args.next(),
             "--book" => match args.next() {
                 Some(p) => book = Some(p),
                 None => {
@@ -50,7 +53,7 @@ fn parse_args() -> (Duration, bool, Option<String>, Option<String>) {
             },
             "-h" | "--help" => {
                 println!(
-                    "usage: connect4-rs [--budget <seconds>] [--no-hints] [--solver <path>]\n  --budget, -b  think time per engine move in seconds (default {})\n  --no-hints    start with LLM hints (socket/MCP state) and the GUI hint rings off;\n                both can be re-enabled at runtime (checkboxes/H, hints command, MCP tool)\n  --solver      an external solver plays the engine seat (Pascal Pons' line\n                protocol); extra args allowed, e.g. --solver 'path/c4solver -w'.\n                A 7x6.book next to the binary is picked up automatically\n  --book        opening book for the engine seat (default: opening-book.txt\n                in the working directory if present; see the bookgen binary)\n  --log         trace every move to stderr: history, engine reply details\n                (book/search, score, depth, nodes, time) and the tactical\n                hints served to the (LLM) player",
+                    "usage: connect4-rs [--budget <seconds>] [--no-hints] [--solver <path>]\n  --budget, -b  think time per engine move in seconds (default {})\n  --no-hints    start with LLM hints (socket/MCP state) and the GUI hint rings off;\n                both can be re-enabled at runtime (checkboxes/H, hints command, MCP tool)\n  --solver      an external solver plays the engine seat (Pascal Pons' line\n                protocol); extra args allowed, e.g. --solver 'path/c4solver -w'.\n                A 7x6.book next to the binary is picked up automatically\n  --book        opening book for the engine seat (default: opening-book.txt\n                in the working directory if present; see the bookgen binary)\n  --log         trace every move to stderr: history, engine reply details\n                (book/search, score, depth, nodes, time) and the tactical\n                hints served to the (LLM) player\n  --tutor       solver command for the learn feature (L key): analyze a lost\n                game and book the plies where the engine threw win/draw.\n                Falls back to $C4_SOLVER, then to the --solver command",
                     DEFAULT_BUDGET.as_secs_f64()
                 );
                 std::process::exit(0);
@@ -61,37 +64,49 @@ fn parse_args() -> (Duration, bool, Option<String>, Option<String>) {
             }
         }
     }
-    (budget, hints, solver, book)
+    (budget, hints, solver, book, tutor)
 }
 
 fn main() -> eframe::Result {
-    let (budget, hints, solver, book) = parse_args();
+    let (budget, hints, solver, book, tutor) = parse_args();
     let solver_active = solver.is_some();
+    let tutor = tutor.or_else(|| std::env::var("C4_SOLVER").ok()).or_else(|| solver.clone());
     // An explicitly named book must load; the default ones are best-effort:
     // the engine-start book plus the corrective book, merged (their keys
     // cannot collide - they cover different sides to move).
+    let mut book_info = "no opening book loaded".to_string();
     let book = match &book {
-        Some(p) => Some(book::Book::load(std::path::Path::new(p)).unwrap_or_else(|e| {
-            eprintln!("{e}");
-            std::process::exit(2);
-        })),
+        Some(p) => {
+            let b = book::Book::load(std::path::Path::new(p)).unwrap_or_else(|e| {
+                eprintln!("{e}");
+                std::process::exit(2);
+            });
+            book_info = format!("book {}: {} positions", p, b.len());
+            Some(b)
+        }
         None => {
             let mut b = book::Book::load(std::path::Path::new("opening-book.txt")).ok();
-            if let Ok(text_b) = book::Book::load(std::path::Path::new("corrective-book.txt")) {
+            let opening = b.as_ref().map_or(0, |b| b.len());
+            let mut corrective = 0;
+            if let Ok(cb) = book::Book::load(std::path::Path::new("corrective-book.txt")) {
+                corrective = cb.len();
                 match &mut b {
                     Some(b) => {
                         let _ = b.merge(std::path::Path::new("corrective-book.txt"));
                     }
-                    None => b = Some(text_b),
+                    None => b = Some(cb),
                 }
+            }
+            if b.is_some() {
+                book_info = format!("opening book: {opening} positions, corrective book: {corrective} entries");
             }
             b
         }
     };
     if let Some(b) = &book {
-        eprintln!("opening book loaded: {} positions", b.len());
+        eprintln!("opening book loaded: {} positions ({book_info})", b.len());
     }
-    let shared = Shared::new(false, budget, hints, solver, book);
+    let shared = Shared::new(false, budget, hints, solver, book, tutor);
     {
         let s = shared.clone();
         std::thread::Builder::new().name("engine".into()).stack_size(16 << 20).spawn(move || s.engine_loop()).unwrap();
@@ -102,13 +117,13 @@ fn main() -> eframe::Result {
     }
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([640.0, 640.0])
+            .with_inner_size([680.0, 740.0])
             .with_title(if solver_active { "Connect4-rs vs external solver" } else { "Connect4-rs" }),
         ..Default::default()
     };
     eframe::run_native("Connect4-rs", options, Box::new(|cc| {
         *shared.repaint.lock().unwrap() = Some(cc.egui_ctx.clone());
-        Ok(Box::new(App { shared, seen_moves: 0, anim: None }))
+        Ok(Box::new(App { shared, seen_moves: 0, anim: None, show_about: false, learn_confirm: false, book_info }))
     }))
 }
 
@@ -126,6 +141,12 @@ struct App {
     /// Number of moves already shown (to detect new moves to animate).
     seen_moves: usize,
     anim: Option<Anim>,
+    /// The About popup (version, books, shortcuts) is open.
+    show_about: bool,
+    /// The learn confirmation dialog is open (L key).
+    learn_confirm: bool,
+    /// Book summary computed at startup, shown in the About popup.
+    book_info: String,
 }
 
 const RED: egui::Color32 = egui::Color32::from_rgb(220, 40, 40);
@@ -147,10 +168,22 @@ impl eframe::App for App {
         // U undo the last move pair, +/- double/halve the think time,
         // H toggle the hint rings (GUI only)
         let mut changed = false;
+        // While the learn analysis runs, the game is read-only: no moves,
+        // undo or new game (the analysis works on a snapshot, but changing
+        // the board mid-learn would only confuse the user).
+        let learning = self.shared.learn.lock().unwrap().running;
         ctx.input(|i| {
+            if learning {
+                return;
+            }
             let mut g = self.shared.game.lock().unwrap();
-            for (k, col) in [egui::Key::Num1, egui::Key::Num2, egui::Key::Num3, egui::Key::Num4, egui::Key::Num5, egui::Key::Num6, egui::Key::Num7].iter().zip(0..COLS) {
-                if i.key_pressed(*k) && g.human_move(col) {
+            // Columns respond to both digits 1-7 and letters a-g (the
+            // board labels use the letters; H upward stays free for the
+            // other shortcuts).
+            let digits = [egui::Key::Num1, egui::Key::Num2, egui::Key::Num3, egui::Key::Num4, egui::Key::Num5, egui::Key::Num6, egui::Key::Num7];
+            let letters = [egui::Key::A, egui::Key::B, egui::Key::C, egui::Key::D, egui::Key::E, egui::Key::F, egui::Key::G];
+            for col in 0..COLS {
+                if (i.key_pressed(digits[col]) || i.key_pressed(letters[col])) && g.human_move(col) {
                     changed = true;
                 }
             }
@@ -176,6 +209,9 @@ impl eframe::App for App {
             if i.key_pressed(egui::Key::U) && g.undo() {
                 changed = true;
             }
+            if i.key_pressed(egui::Key::L) && !g.history.is_empty() {
+                self.learn_confirm = true;
+            }
         });
 
         let mut g = self.shared.game.lock().unwrap();
@@ -186,7 +222,7 @@ impl eframe::App for App {
         let margin = 12.0;
         let outer = ui.available_rect_before_wrap();
         let cell_est = ((outer.width() - 2.0 * margin) / COLS as f32)
-            .min((outer.height() - 150.0) / ROWS as f32)
+            .min((outer.height() - 175.0) / ROWS as f32)
             .clamp(20.0, 90.0);
         let content_w = cell_est * COLS as f32;
         let x0 = outer.min.x + ((outer.width() - content_w) * 0.5).max(margin);
@@ -263,6 +299,7 @@ impl eframe::App for App {
             // Settings strip: the keyboard shortcuts stay available, this is
             // the discoverable way to reach the same things.
             ui.horizontal(|ui| {
+                ui.add_enabled_ui(!learning, |ui| {
                 if ui.button("New game").clicked() {
                     let (es, bud, h, sh) = (g.engine_starts, g.budget, g.hints, g.show_hints);
                     *g = game::Game::new(es, bud, h, sh);
@@ -271,6 +308,7 @@ impl eframe::App for App {
                 if ui.button("Undo").on_hover_text("Take back your last move (U)").clicked() && g.undo() {
                     changed = true;
                 }
+                });
                 let mut es = g.engine_starts;
                 if ui.checkbox(&mut es, "Engine starts").on_hover_text("Applies to the next new game").changed() {
                     g.engine_starts = es;
@@ -279,9 +317,8 @@ impl eframe::App for App {
                 if ui.checkbox(&mut sh, "Hint rings").on_hover_text("GUI overlay only (H)").changed() {
                     g.show_hints = sh;
                 }
-                let mut h = g.hints;
-                if ui.checkbox(&mut h, "LLM hints").on_hover_text("Tactical hints in the socket/MCP state").changed() {
-                    g.hints = h;
+                if ui.button("About").clicked() {
+                    self.show_about = !self.show_about;
                 }
                 let mut secs = g.budget.as_secs_f64();
                 if ui
@@ -306,7 +343,8 @@ impl eframe::App for App {
                 .hover_pos()
                 .filter(|p| rect.contains(*p))
                 .map(|p| (((p.x - rect.min.x) / cell) as usize).min(COLS - 1));
-            if resp.clicked()
+            if !learning
+                && resp.clicked()
                 && let Some(c) = hover_col
                 && g.human_move(c)
             {
@@ -419,13 +457,87 @@ impl eframe::App for App {
                 painter.text(
                     egui::pos2(rect.min.x + (c as f32 + 0.5) * cell, rect.max.y + 12.0),
                     egui::Align2::CENTER_CENTER,
-                    format!("{}", c + 1),
+                    format!("{}", (b'a' + c as u8) as char),
                     egui::FontId::proportional(16.0),
                     ui.visuals().text_color(),
                 );
             }
         });
         drop(g);
+        if self.learn_confirm {
+            egui::Window::new("Learn from this game?")
+                .collapsible(false)
+                .resizable(false)
+                .default_width(440.0)
+                .show(ctx, |ui| {
+                    ui.label(
+                        "Analyze the game on the board with the solver and book every \
+                         position where the engine threw away a win or a draw. \
+                         Early positions can take the solver a few minutes.",
+                    );
+                    ui.horizontal(|ui| {
+                        if ui.button("Analyze").clicked() {
+                            self.learn_confirm = false;
+                            self.shared.start_learn();
+                        }
+                        if ui.button("Cancel").clicked() {
+                            self.learn_confirm = false;
+                        }
+                    });
+                });
+        }
+        {
+            let mut l = self.shared.learn.lock().unwrap();
+            if l.running || !l.report.is_empty() {
+                let mut open = true;
+                egui::Window::new("Learning from the game")
+                    .collapsible(false)
+                    .resizable(false)
+                    .default_width(440.0)
+                    .open(&mut open)
+                    .show(ctx, |ui| {
+                        ui.label(&l.report);
+                        if l.running {
+                            ui.horizontal(|ui| {
+                                ui.spinner();
+                                if ui.button("Cancel").clicked() {
+                                    l.cancel = true;
+                                    // Kill the solver so even a long query
+                                    // aborts immediately.
+                                    if let Some(pid) = l.solver_pid {
+                                        let _ = std::process::Command::new("kill").arg(pid.to_string()).status();
+                                    }
+                                }
+                            });
+                        }
+                    });
+                if !open && !l.running {
+                    l.report.clear();
+                }
+            }
+        }
+        if self.show_about {
+            egui::Window::new("About Connect4-rs")
+                .collapsible(false)
+                .resizable(false)
+                .open(&mut self.show_about)
+                .show(ctx, |ui| {
+                    ui.label(format!(
+                        "Version {} ({}), built {}",
+                        env!("CARGO_PKG_VERSION"), env!("GIT_HASH"), env!("BUILD_DATE")
+                    ));
+                    ui.label(&self.book_info);
+                    ui.separator();
+                    ui.label("Keyboard shortcuts:");
+                    ui.monospace("1-7 / a-g   drop a piece in that column");
+                    ui.monospace("N, Space    new game");
+                    ui.monospace("S           swap who starts (new game)");
+                    ui.monospace("U           undo your last move");
+                    ui.monospace("+ / -       double / halve think time");
+                    ui.monospace("H           toggle the hint rings");
+                    ui.monospace("L           learn: book the engine's mistakes in this game");
+                });
+        }
         if changed {
             self.shared.notify();
         }

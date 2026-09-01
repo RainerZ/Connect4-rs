@@ -104,6 +104,7 @@ block at e4 directly beneath the solver's diagonal win at e5. Solver
 think times fell from 101 s (first bookless query) to 0 ms as its
 kept-alive process warmed up.
 
+
 ## 10 — combined engine + distilled book vs the perfect solver · **engine wins**, 41 plies
 
 ```
@@ -122,8 +123,11 @@ converted on stone 41, the latest a perfect defender can be beaten.
 
 
 
-## 13 — combined engine (headless CLI) · kimi-k3 red, hints on, budget 2s, · **kimi-k3 wins**, engine resigns after 23 plies
- 
+## 11 — V1.3.0 **engine lost against kimi-k3**
+
+kimi-k3 on red, llm hints on, budget 2s, · **kimi-k3 wins**, engine resigns after 23 plies
+Connect4-rs v1.3.0 with 50 line corrective book.  
+
 ```
 4,4,3,5,2,1,4,3,5,2,1,3,4,3,3,5,4,4,5,5,3,6,7
 ```
@@ -139,3 +143,21 @@ to move, yellow was bound to run out of safe moves first; after red's
 quiet g1 the engine's search proved every line lost (-1000, depth 16)
 and it resigned rather than be forced into column 6.
  
+Note: 6s think time on MacBook Air is enough to break this sequence.
+Since the learn feature analyzed this game, the ply-12 blunder is booked
+(`corrective-book.txt`, with a provenance comment): replaying kimi's line
+now deviates at stone 12 — the engine answers e from the book and holds
+the win at 2 s.
+
+Analysis — the solver trace rewrites the story of game 11 in a
+fascinating way:
+
+| ply | position after | verdict (engine view) | engine played | judgment |
+|---|---|---|---|---|
+| 1 | `4` | lost (−1) — kimi's center opening is perfect | 4 | best resistance ✓ |
+| 3 | `4,4,3` | **engine WINS (+2)** — kimi's 3 threw the win away! | 5 | would keep the win ✓ |
+| 5–9 | … | engine still winning (+2…+1) | 1, 3, 2 | all preserving ✓ |
+| 11 | `4,4,3,5,2,1,4,3,5,2,1` | engine wins (+1), **only column 5** | 3 | **THREW IT** (c scores −2) |
+| 13–21 | … | lost (−2) | … | best resistance to the end ✓ |
+
+So the real drama: kimi blundered first (ply 3, 3 handed the engine a won game), the engine held that win for eight plies — through exactly the band the corrective book covers, playing correctly everywhere — and then returned the favor at stone 11, in a needle-sharp position where only the e-column wins. Everything after was kimi flawlessly converting a theoretically won game; the celebrated zugzwang construction was the execution, not the turning point.

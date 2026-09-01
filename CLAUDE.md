@@ -42,6 +42,12 @@ of writing: engine 6 – Claude 2.
   With `--book opening-book.txt` (distilled from the solver by the
   bookgen binary, committed in the repo) the engine beats the perfect
   solver as first player at 2 s.
+- Learn from lost games: L key in the GUI (confirmation dialog) or
+  {"cmd":"learn"} on the socket traces the current game with the solver
+  (--tutor / $C4_SOLVER / --solver) and books every ply where the engine
+  threw win/draw - appended to corrective-book.txt with a # provenance
+  comment and active immediately (book is behind a mutex).
+  corrective-audited.txt is gitignored resume state for deep audit runs.
 - `bookgen --corrective <stones>` audits every engine-to-move position
   (human first) against the solver and books only the engine's mistakes
   (corrective-book.txt, auto-loaded next to opening-book.txt). Killed

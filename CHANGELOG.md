@@ -5,6 +5,12 @@ improvement additionally lives in its own branch (`simple-engine`,
 `transposition-table`, `threat-eval`, `combined-engine`, …) so its effect
 on play stays observable — see the README's branch overview.
 
+## [V1.4.0](https://github.com/RainerZ/Connect4-rs/tree/V1.4.0) — 2026-09-01
+
+- learn from lost games (L key) and option --tutor
+- book comments, GUI polish
+- corrective-book enlarged to 5 stone
+
 ## [V1.3.0](https://github.com/RainerZ/Connect4-rs/tree/V1.3.0) — 2026-08-26
 
 The corrective book, tooling and polish:

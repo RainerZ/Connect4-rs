@@ -313,20 +313,92 @@ pub struct Shared {
     pub repaint: Mutex<Option<eframe::egui::Context>>,
     /// External solver command playing the engine seat (--solver).
     pub solver: Option<String>,
-    /// Opening book consulted before searching (--book).
-    pub book: Option<Book>,
+    /// Opening book consulted before searching (--book). Behind a mutex
+    /// so learned corrections can be inserted at runtime.
+    pub book: Mutex<Option<Book>>,
+    /// Solver command for the learn feature (--tutor / C4_SOLVER /
+    /// falling back to the --solver seat command).
+    pub tutor: Option<String>,
+    /// Learn-from-game progress/report, displayed by the GUI popup.
+    pub learn: Mutex<LearnState>,
+}
+
+#[derive(Default)]
+pub struct LearnState {
+    pub running: bool,
+    pub report: String,
+    /// Set by the Cancel button; checked between plies (and the solver
+    /// process is killed so even a long query aborts).
+    pub cancel: bool,
+    pub solver_pid: Option<u32>,
 }
 
 impl Shared {
-    pub fn new(engine_starts: bool, budget: Duration, hints: bool, solver: Option<String>, book: Option<Book>) -> Arc<Shared> {
+    pub fn new(
+        engine_starts: bool,
+        budget: Duration,
+        hints: bool,
+        solver: Option<String>,
+        book: Option<Book>,
+        tutor: Option<String>,
+    ) -> Arc<Shared> {
         Arc::new(Shared {
             game: Mutex::new(Game::new(engine_starts, budget, hints, hints)),
             changed: Condvar::new(),
             stats: SearchStats::default(),
             repaint: Mutex::new(None),
             solver,
-            book,
+            book: Mutex::new(book),
+            tutor,
+            learn: Mutex::new(LearnState::default()),
         })
+    }
+
+    /// Run the learn analysis on a background thread; progress and the
+    /// final report land in `self.learn` for the GUI popup.
+    pub fn start_learn(self: &Arc<Self>) {
+        let (history, engine_side) = {
+            let g = self.game.lock().unwrap();
+            (g.history.clone(), g.engine())
+        };
+        let Some(cmd) = self.tutor.clone() else {
+            self.learn.lock().unwrap().report = "no solver configured: start with --tutor <cmd> (or set C4_SOLVER)".into();
+            return;
+        };
+        {
+            let mut l = self.learn.lock().unwrap();
+            if l.running {
+                return;
+            }
+            l.running = true;
+            l.report = "starting solver ...".into();
+            l.cancel = false;
+            l.solver_pid = None;
+        }
+        let me = self.clone();
+        std::thread::spawn(move || {
+            let progress = |msg: String| {
+                me.learn.lock().unwrap().report = msg;
+                if let Some(ctx) = me.repaint.lock().unwrap().as_ref() {
+                    ctx.request_repaint();
+                }
+            };
+            let me2 = me.clone();
+            let on_spawn = move |pid: u32| {
+                me2.learn.lock().unwrap().solver_pid = Some(pid);
+            };
+            let me3 = me.clone();
+            let cancelled = move || me3.learn.lock().unwrap().cancel;
+            let report = crate::learn::learn_from(&history, engine_side, &cmd, &me.book, &progress, &on_spawn, &cancelled);
+            let mut l = me.learn.lock().unwrap();
+            l.report = report;
+            l.running = false;
+            l.solver_pid = None;
+            drop(l);
+            if let Some(ctx) = me.repaint.lock().unwrap().as_ref() {
+                ctx.request_repaint();
+            }
+        });
     }
 
     pub fn notify(&self) {
@@ -368,7 +440,7 @@ impl Shared {
                 (g.board, g.engine(), g.budget, g.history.clone())
             };
             let t0 = Instant::now();
-            let book_move = self.book.as_ref().and_then(|bk| bk.get(board.key(p)));
+            let book_move = self.book.lock().unwrap().as_ref().and_then(|bk| bk.get(board.key(p)));
             let is_book = book_move.is_some();
             let r = if let Some((col, _raw)) = book_move {
                 // Book hit: the move is played from the book regardless,

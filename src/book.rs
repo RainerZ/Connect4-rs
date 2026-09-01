@@ -3,9 +3,8 @@
 //! Text format, one entry per line: `<position key hex> <col 1-7> <raw>`,
 //! where the key is `Board::key` for the side to move, the column is the
 //! solver's best move and `raw` its solver score (positive = the mover
-//! wins). Looked up before every engine search; a hit is played instantly
-//! and, since all distilled entries are winning moves, reported as a
-//! proven win.
+//! wins). Everything after a `#` is a comment - used by learned entries to
+//! record their provenance. Looked up before every engine search.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -15,6 +14,10 @@ pub struct Book {
 }
 
 impl Book {
+    pub fn empty() -> Book {
+        Book { entries: HashMap::new() }
+    }
+
     pub fn load(path: &Path) -> Result<Book, String> {
         let mut b = Book { entries: HashMap::new() };
         b.merge(path)?;
@@ -28,6 +31,8 @@ impl Book {
         let text = std::fs::read_to_string(path).map_err(|e| format!("cannot read book {}: {e}", path.display()))?;
         let entries = &mut self.entries;
         for (n, line) in text.lines().enumerate() {
+            // Strip comments: full-line and trailing (provenance notes).
+            let line = line.split('#').next().unwrap_or("");
             let mut t = line.split_whitespace();
             let (Some(k), Some(c), Some(r)) = (t.next(), t.next(), t.next()) else {
                 continue;
@@ -45,6 +50,17 @@ impl Book {
 
     pub fn len(&self) -> usize {
         self.entries.len()
+    }
+
+    /// True if the position is already covered.
+    pub fn contains(&self, key: u64) -> bool {
+        self.entries.contains_key(&key)
+    }
+
+    /// Add an entry at runtime (learned corrections become active without
+    /// a restart; persisting to the file is the caller's job).
+    pub fn insert(&mut self, key: u64, col: usize, raw: i32) {
+        self.entries.insert(key, (col as u8, raw as i8));
     }
 
     /// Book move (0-based column) and raw solver score for the position

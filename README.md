@@ -5,8 +5,8 @@ LLM try to beat it while you watch.**
 
 The project started with the idea of seeing how strong an LLM can play
 Connect Four. It turned out that the naive negamax/alpha-beta approach on
-a fast heuristic board score, with a few seconds of think time per move,
-was beatable by the LLM:
+a fast heuristic incremental board score, with a few seconds of think
+time per move and 10-20 MNodes/s, was beatable by an LLM:
 
 <p align="center"><img src="docs/winning-board.png" alt="Claude's winning board against the engine" width="520"></p>
 
@@ -15,9 +15,10 @@ the engine — more on that [below](#results-so-far).*
 
 After that, the engine was improved step by step — see the details below.
 The final engine, starting the game with only a 109 KB opening book
-distilled from a perfect solver, holds the win against that same perfect
-solver at 2 seconds per move — while more think time without the
-knowledge had lost the game on the very first move.
+distilled from a perfect solver, holds the first player win against a
+perfect solver (like https://github.com/PascalPons/connect4) at 2 seconds per move — while more think time without the knowledge had lost the game on the very first move.  
+As a second player, the engine captures early first-player mistakes and
+turns them into a win, using a corrective-book with t.b.d. entries.
 
 Under the hood: a bitboard engine searching ~20 million positions per
 second, a clean egui desktop GUI, and an
@@ -26,10 +27,11 @@ into tools any LLM agent can play with.
 
 ## Highlights
 
-* **Fast engine** — two `u64` bitboards, incrementally updated evaluation,
-  negamax with alpha/beta, transposition table, principal variation search
-  and MTD(f), iterative deepening on a time budget. Endgames are searched
-  to the end; proven wins are announced and hopeless positions resigned.
+* **Fast engine** — 2x`u64` bitboards, incrementally updated evaluation,
+  negamax with alpha/beta, a 64 MByte transposition table, principal
+  variation search (PVS) and MTD(f) (Memory-enhanced Test Driver),
+  iterative deepening on a time budget. Endgames are searched to the end;
+  proven wins are announced and hopeless positions resigned.
 * **Human-friendly GUI** — click to drop (with a landing ghost), gravity
   drop animation, tactical hint rings, eval bar, think-time slider.
 * **LLM-friendly interface** — a JSON control socket and an MCP server with
@@ -56,7 +58,7 @@ Build in release mode — the engine is roughly 10× slower in debug.
 src/
   engine.rs   bitboard + incremental evaluation + negamax search (no_std-style, no allocations)
   game.rs     game state shared by GUI, engine thread and control socket
-  book.rs     opening book lookup (distilled from a perfect solver, see bookgen)
+  book.rs     opening book lookup (distilled from https://github.com/PascalPons/connect4, see bookgen)
   hints.rs    optional LLM assistance (tactical bookkeeping), not used by the engine
   solver.rs   adapter for an external solver (Pascal Pons line protocol)
   server.rs   control socket on 127.0.0.1:4444 (newline-delimited JSON)
@@ -126,17 +128,22 @@ ring with an x = loses immediately. The rings are a GUI-only display and
 independent of the LLM hints in the socket/MCP state, so you can watch the
 rings while a model plays unaided (and vice versa); both default to on.
 
-A settings strip offers New-game and Undo buttons, an "engine starts" checkbox
-(applies to the next game), the hints toggle and a logarithmic think-time
-slider (0.05–60 s). A small eval bar in the status area shows red's share
+A settings strip offers New-game, Undo and About buttons, an "engine
+starts" checkbox (applies to the next game), the hint-rings toggle and a
+logarithmic think-time slider (0.05–60 s). The LLM hints have no GUI
+control - they default to on and are governed by `--no-hints`, the socket
+command or the MCP tool. A small eval bar in the status area shows red's share
 of the engine's last score: middle = balanced, full = proven win.
 
-Keys: `1`–`7` drop a piece, `N`/`Space` new game, `S` swap who starts (and
-start a new game), `U` undo your last move (works after the engine's
-reply, after a lost game, and even while the engine is still thinking),
-`+`/`-` double/halve the engine's think time, `H` toggle
+Keys: `1`–`7` or `a`–`g` drop a piece (the board labels its columns a–g,
+matching the square notation used in the docs), `N`/`Space` new game, `S`
+swap who starts (and start a new game), `U` undo your last move (works
+after the engine's reply, after a lost game, and even while the engine is
+still thinking), `+`/`-` double/halve the engine's think time, `L` learn from the game on
+the board (see below), `H` toggle
 the hint rings (GUI only; the LLM hints have their own checkbox and socket
-command, see below). The status line shows think time and hint state; while
+command, see below). An **About** button opens a popup with the version,
+git hash and build date, the loaded book sizes and the shortcut list. The status line shows think time and hint state; while
 the engine thinks it shows the iteration depth and live node count,
 afterwards score, depth, nodes and time of the last search.
 
@@ -149,12 +156,15 @@ Command line options (`connect4-rs --help`):
 | `--hints` | the default: both on |
 | `--solver <cmd>` | an external solver plays the engine seat (see below) |
 | `--book <file>` | opening book for the engine seat; without the flag, `opening-book.txt` in the working directory is loaded automatically if present |
+| `--tutor <cmd>` | solver command for the learn feature (`L` key); falls back to `$C4_SOLVER`, then to the `--solver` command |
 | `--log` | trace every move to stderr: move + history, the engine's reply details (book or search, score, depth, nodes, time, resignations) and the tactical hints served to the (LLM) player |
 
 ```bash
+# examples
 cargo run --release -- --budget 5     # a stronger engine: 5 s per move
 cargo run --release -- --no-hints     # bare start: no hints anywhere
 cargo run --release -- --book my.txt  # explicit opening book (must load)
+cargo run --release -- --tutor /Users/rainer/git/connect4-pp/c4solver # analyze and book the plies where the engine lost a game, solver from https://github.com/PascalPons/connect4
 ```
 
 ### Playing against an external solver
@@ -206,6 +216,8 @@ appended immediately so an interrupted run resumes, and the whole
 distillation took ~40 bookless minutes:
 
 ```bash
+# calculate a 6 stone book with Pascal Pons solver
+# Be aware that this might take some time
 cargo run --release --bin bookgen -- --solver /path/to/c4solver --plies 6
 ```
 
@@ -246,24 +258,47 @@ throw away a win or a draw does the book get an entry — the shipped file
 is exactly the map of the engine's early blind spots, not opening theory.
 
 ```bash
+# calculate the corrective book for 3 stones
 cargo run --release --bin bookgen -- --solver /path/to/c4solver --corrective 3
+
+# check progress
+wc -l corrective-audited.txt corrective-book.txt
 ```
 
 The result is `corrective-book.txt`; the GUI auto-loads it alongside
 `opening-book.txt` (their keys cannot collide). The 3-stone pilot audited
 all 245 positions and found **50 corrections (20 %)** — 36 preserving a
 win, 14 a draw. Two are direct replies to a human opening: when the
-human opens on b1, only the answer c1 keeps the engine's win, and after
-an f1 opening only e1 does — the engine's search prefers the centre and
+human opens on `2`, only `2,3` keeps the engine's win, and after
+an `6` opening only `6,5` does — the engine's search prefers the centre and
 lets both slip. The rest are positions where the
 human's bad opening hands the engine a won game that only one unintuitive
-move keeps (after `1,2,2` only b3 wins; after `5,2,1` only f1; after
+move keeps (after `1,2,2` only `1,2,2,2` wins; after `5,2,1` only `5,2,1,6`; after
 `7,7,6` even the draw hangs on the f-column). A killed run loses
 nothing: corrections are flushed line by line,
 re-runs keep existing entries, and `--skip <n>` resumes the deterministic
 audit order. `scripts/validate_book.py` replays every entry onto the
 running GUI and checks the engine answers with the booked move, from the
 book.
+
+#### Learning from lost games
+
+The exhaustive audit ends at a few stones, but the engine can also study
+its individual losses ("the engine's opening preparation"): with the lost
+game still on the board, press `L` (or send `{"cmd":"learn"}` on the
+socket, or first `replay` any recorded game). After a confirmation dialog
+the solver traces every engine-to-move position of the game and books each
+ply where the engine threw away a win or a draw — appended to
+`corrective-book.txt` with a provenance comment (`# learned from <game>
+(threw win at ply N)`; everything after `#` is a comment in the book
+format) and inserted into the live book, so replaying the opponent's
+winning line immediately breaks at the corrected ply. The solver command
+comes from `--tutor`, `$C4_SOLVER` or the `--solver` seat; positions that
+the audit already covers report "already covered", and a game the
+opponent won on merit reports exactly that. First proof: kimi-k3's win
+(game 11 in [docs/games.md](docs/games.md)) was analyzed this way — the
+engine had thrown a won game at ply 12 (only e keeps it, it played c);
+one `learn` later the replay deviates there, from the book.
 
 Keys are exactly invertible, and the `bookview` tool makes them readable:
 
@@ -276,8 +311,7 @@ prints the ASCII board, the side to move, a legal move history reaching
 the position (reconstructed by backtracking - transpositions may yield a
 different but equivalent one), the entries any present book files hold for
 it, and a ready-to-paste `replay` command that pushes the position onto
-the running GUI. The
-engine seat consults it before searching (`--book <file>`, or
+the running GUI. The engine seat consults it before searching (`--book <file>`, or
 automatically when `opening-book.txt` sits in the working directory —
 both the GUI and `versus`). A book hit plays the book move, but is not
 reported as a forced win: the status line and the socket/MCP state mark
@@ -311,6 +345,14 @@ The GUI listens on `127.0.0.1:4444`, one JSON object per line:
 {"cmd":"new","engine_starts":false}
 {"cmd":"hints","on":true}          # toggle LLM hints, returns the state
 {"cmd":"replay","moves":[4,4,…]}   # replay a full game, both sides' columns
+{"cmd":"learn","solver":"…"}       # book the engine's mistakes in this game
+```
+
+Example:
+
+```bash
+printf '{"cmd":"replay","moves":[4,4,4,4]}\n' | nc 127.0.0.1 4444
+printf '{"cmd":"learn","solver":"/Users/rainer/git/connect4-pp/c4solver"}\n' | nc 127.0.0.1 4444
 ```
 
 Replies contain the board (`rows`, top row first, `R`/`Y`/`.`), `status`
@@ -330,9 +372,9 @@ To separate the two, the state can carry one-ply tactical hints:
 * `losing_moves` — columns after which the opponent has an immediate win
 
 This is **assistance for the client only**; the engine never sees it. On by
-default; toggle with the "LLM hints" checkbox in the GUI, `--no-hints` at
-startup, `{"cmd":"hints","on":…}` on the socket or the `connect4_hints` MCP
-tool, and compare a model's results with and without. The GUI's hint rings
+default; disable with `--no-hints` at startup, or toggle at runtime with
+`{"cmd":"hints","on":…}` on the socket or the `connect4_hints` MCP tool,
+and compare a model's results with and without. The GUI's hint rings
 are a separate, display-only flag (`H` key / "Hint rings" checkbox), so
 turning the rings off never changes what a model sees.
 
