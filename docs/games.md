@@ -3,7 +3,9 @@
 All games played 2026-08-23/24 over the MCP interface, engine at the 2 s
 default budget unless noted (game 9: Pascal Pons' perfect solver in the
 engine seat via `--solver`). Columns are 1–7; moves alternate starting
-with the first player. Any game can be replayed onto the running GUI:
+with the first player. Board squares in the notes use chess-like
+notation: columns a–g left to right, rows 1–6 bottom up (so move "4"
+lands on d1 when the column is empty). Any game can be replayed onto the running GUI:
 
 ```bash
 printf '{"cmd":"replay","moves":[...]}\n' | nc 127.0.0.1 4444
@@ -33,7 +35,7 @@ Double threat (diagonal + column-6 vertical); Claude missed the vertical.
 4,4,4,4,3,2,5,6,5,4,5,5,3,3,3,2,5,1
 ```
 
-Claude miscounted a column height (intended c3r3, landed c3r2) and handed
+Claude miscounted a column height (intended c3, landed c2) and handed
 the engine a double diagonal — the loss that motivated the LLM hints.
 
 ## 4 — simple engine (2 s budget) · Claude red, hints on · **Claude wins**, 39 plies
@@ -52,8 +54,8 @@ The recorded win (screenshot in the README, move-by-move protocol there;
 ```
 
 The deeper engine deviated from game 4 exactly where the 10 s analysis
-predicted (c5r6 at ply 14 — then transposed straight back — and c7r1
-instead of the fatal c1r2 at ply 18), but the c3r3 freeze wins against
+predicted (e6 at ply 14 — then transposed straight back — and g1
+instead of the fatal a2 at ply 18), but the c3 freeze wins against
 both tries; it proved its loss at depth 20 in 226 ms and resigned.
 
 ## 6 — threat-eval engine · Claude red, hints on · engine wins, 24 plies
@@ -62,8 +64,8 @@ both tries; it proved its loss at depth 20 in 226 ms and resigned.
 4,4,4,4,5,3,6,7,3,3,2,3,1,6,7,7,2,4,2,2,3,5,5,5
 ```
 
-Constructive style: c2r4 made a row-4 trio plus a diagonal trio, then
-c5r2 stacked two win squares (c5r3/c5r4) — no single block answers.
+Constructive style: b4 made a row-4 trio plus a diagonal trio, then
+e2 stacked two win squares (e3/e4) — no single block answers.
 
 ## 7 — threat-eval engine · Claude red, hints on · engine wins, 22 plies
 
@@ -82,7 +84,7 @@ threats defending threats.
 ```
 
 Engineered zugzwang: the engine arranged its win squares below Claude's in
-both open columns, sealed the parity with the quiet c1r1 (+1000 announced
+both open columns, sealed the parity with the quiet a1 (+1000 announced
 at depth 15 on that move), burned the neutral squares and won when Claude
 ran out of safe moves — Claude's own game-4 strategy, played back without
 hints and proven fifteen plies out.
@@ -95,10 +97,10 @@ hints and proven fifteen plies out.
 
 Claude held the theoretical first-player win for eight plies (the solver's
 score stayed at "losing as slowly as possible"), then threw the win at
-ply 9 (c3r1, a tempo-grabbing forcing move — the solver proved the draw in
-1 ms) and the draw at ply 11 (c5r2, enabling the c5r3 diagonal hub). The
+ply 9 (c1, a tempo-grabbing forcing move — the solver proved the draw in
+1 ms) and the draw at ply 11 (e2, enabling the e3 diagonal hub). The
 execution ended with the signature stacked double: Claude's forced row-4
-block at c5r4 directly beneath the solver's diagonal win at c5r5. Solver
+block at e4 directly beneath the solver's diagonal win at e5. Solver
 think times fell from 101 s (first bookless query) to 0 ms as its
 kept-alive process warmed up.
 
@@ -116,3 +118,24 @@ The solver's score after every engine move stayed at −1: the theoretical
 win was never dropped. Plies 13–25 were played by the unassisted 2 s
 heuristic — perfectly; from ply 25 the engine's own proofs took over and
 converted on stone 41, the latest a perfect defender can be beaten.
+
+
+
+
+## 13 — combined engine (headless CLI) · kimi-k3 red, hints on, budget 2s, · **kimi-k3 wins**, engine resigns after 23 plies
+ 
+```
+4,4,3,5,2,1,4,3,5,2,1,3,4,3,3,5,4,4,5,5,3,6,7
+```
+ 
+A zugzwang win built on a diagonal the engine could never safely contest.
+Red's ply-21 c6 completed the trio c6,d5,e4 with the completion
+square f3 one stone above the floor of column 6 — making column 6 taboo
+for *both* sides: yellow's f2 loses instantly to f3, while red's
+f2 would let yellow cap the diagonal at f3. Column 2 was equally
+taboo for red since b3 hands yellow the e1,d2,c3,b4
+diagonal. With 15 neutral filler cells left outside those columns and red
+to move, yellow was bound to run out of safe moves first; after red's
+quiet g1 the engine's search proved every line lost (-1000, depth 16)
+and it resigned rather than be forced into column 6.
+ 

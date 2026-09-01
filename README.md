@@ -252,9 +252,10 @@ cargo run --release --bin bookgen -- --solver /path/to/c4solver --corrective 3
 The result is `corrective-book.txt`; the GUI auto-loads it alongside
 `opening-book.txt` (their keys cannot collide). The 3-stone pilot audited
 all 245 positions and found **50 corrections (20 %)** — 36 preserving a
-win, 14 a draw. Two are direct replies to a human opening (after `2` only
-c1 keeps the engine's win, after `6` only e1 — the engine's search
-prefers the centre and lets both slip), the rest are positions where the
+win, 14 a draw. Two are direct replies to a human opening: when the
+human opens on b1, only the answer c1 keeps the engine's win, and after
+an f1 opening only e1 does — the engine's search prefers the centre and
+lets both slip. The rest are positions where the
 human's bad opening hands the engine a won game that only one unintuitive
 move keeps (after `1,2,2` only b3 wins; after `5,2,1` only f1; after
 `7,7,6` even the draw hangs on the f-column). A killed run loses
@@ -457,24 +458,25 @@ With hints on, Claude (red) beat the engine (2 s budget, depth 12–20) —
 that game's final position is the screenshot at the top of this page, with
 the winning line circled.
 
-Protocol of the win (columns 1–7; `Rc`/`Yc` = red/yellow drop in column c):
+Protocol of the win (columns 1–7; `Rc`/`Yc` = red/yellow drop in column
+c; squares in chess-like notation, columns a–g, rows 1–6 bottom up):
 
 | # | moves | note |
 |---|-------|------|
 | 1–6 | R4 Y4, R4 Y4, R5 Y6 | centre stack, then both extend row 1 |
-| 7–12 | R3 Y2, R5 Y4, R5 Y5 | red builds column 5 / row 3; yellow takes c4r4/c4r5 |
-| 13–14 | R5 Y4 | **c5r5**: kills the two yellow diagonals through that hinge (they decided game 3); yellow fills column 4 |
-| 15–16 | R1 Y5 | **c1r1** prophylaxis: the a1–d4 diagonal is dead for good |
-| 17–20 | R3 Y1, R3 Y3 | red takes **c3r3** (row 3 trio) — engine eval drops to −1000: column 2 is frozen, c2r3 wins for both sides but red's claim sits below |
+| 7–12 | R3 Y2, R5 Y4, R5 Y5 | red builds column 5 / row 3; yellow takes d4/d5 |
+| 13–14 | R5 Y4 | **e5**: kills the two yellow diagonals through that hinge (they decided game 3); yellow fills column 4 |
+| 15–16 | R1 Y5 | **a1** prophylaxis: the a1–d4 diagonal is dead for good |
+| 17–20 | R3 Y1, R3 Y3 | red takes **c3** (row 3 trio) — engine eval drops to −1000: column 2 is frozen, b3 wins for both sides but red's claim sits below |
 | 21–24 | R6 Y6, R6 Y7 | forced sequence in column 6: yellow must block row 3, red must block row 4 |
-| 25–26 | R7 Y1 | hint-flagged forced block: c7r2 would have completed yellow's c4r5–c7r2 diagonal |
+| 25–26 | R7 Y1 | hint-flagged forced block: g2 would have completed yellow's d5–g2 diagonal |
 | 27–28 | R1 Y1 | red breaks yellow's column-1 vertical |
 | 29–34 | R7 Y1, R7 Y7, R7 Y6 | red's **column-7 vertical threat** forces yellow's block — the tempo gain that wins the zugzwang |
-| 35–38 | R6 Y3, R3 Y2 | red seals row 6, blocks c3r6; yellow is out of safe squares and must enter column 2 |
-| 39 | **R2** | c2r3 completes two fours at once: 2-3-4-5 on row 3 and the c4r1–c1r4 diagonal (circled in the screenshot at the top) — red wins |
+| 35–38 | R6 Y3, R3 Y2 | red seals row 6, blocks c6; yellow is out of safe squares and must enter column 2 |
+| 39 | **R2** | b3 completes two fours at once: 2-3-4-5 on row 3 and the d1–a4 diagonal (circled in the screenshot at the top) — red wins |
 
 The hints did exactly what they were built for: they caught the two forced
-blocks and kept the column heights straight, while the strategy (the c5r5
+blocks and kept the column heights straight, while the strategy (the e5
 prophylaxis, freezing column 2, the tempo fight) was the model's own.
 (The second Claude win was against the engine of the `transposition-table`
 branch, which deviated from the recorded line exactly where a 10 s analysis
@@ -482,7 +484,7 @@ predicted but lost to the same column-2 freeze and resigned after 19 plies.)
 
 The threat-aware engine of this branch then beat Claude twice, playing a
 visibly different, constructive style at only depth 11–13: in game one it
-stacked two win squares in one column (c5r3 diagonal under c5r4 row) so no
+stacked two win squares in one column (e3 diagonal under e4 row) so no
 single block answered; in the rematch Claude avoided every earlier mistake
 - reversed a trap so the engine had to block with a useless stone, killed
 three lines with one prophylactic move - and still lost to a row-5 trio
@@ -494,7 +496,7 @@ of preceding losses.
 
 The combined engine then won the showdown game with a third kind of win:
 an engineered zugzwang. It arranged its win squares *below* Claude's in
-both remaining open columns, sealed the parity with a quiet c1r1 - and
+both remaining open columns, sealed the parity with a quiet a1 - and
 announced the forced win at depth 15 the moment it did - then burned the
 neutral squares until Claude ran out of safe moves. That is exactly the
 strategy Claude had used to beat the simple engine in its first win,
@@ -521,8 +523,8 @@ winning square.
 The win reproduces against the stronger engine of this branch
 (transposition table + PVS + MTD(f), depth 13-17 at the same 2 s budget):
 the deeper engine deviated from the recorded game exactly where the 10 s
-analysis predicted (c5r6 at ply 14 - then it transposed straight back -
-and c7r1 instead of the fatal c1r2 at ply 18), but the c3r3 freeze of
+analysis predicted (e6 at ply 14 - then it transposed straight back -
+and g1 instead of the fatal a2 at ply 18), but the c3 freeze of
 column 2 wins against both tries. This time the engine proved its loss at
 depth 20 within 226 ms and resigned on the spot after 19 plies. The losing
 mistake therefore lies before ply 18; positionally understanding such
