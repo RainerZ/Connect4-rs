@@ -18,7 +18,9 @@ The final engine, starting the game with only a 109 KB opening book
 distilled from a perfect solver, holds the first player win against a
 perfect solver (like https://github.com/PascalPons/connect4) at 2 seconds per move — while more think time without the knowledge had lost the game on the very first move.  
 As a second player, the engine captures early first-player mistakes and
-turns them into a win, using a corrective-book with t.b.d. entries.
+turns them into a win, using a 5-stone corrective book with 672
+solver-verified entries — the engine's own early blind spots, mapped out
+over every position of the first five stones.
 
 Under the hood: a bitboard engine searching ~20 million positions per
 second, a clean egui desktop GUI, and an
@@ -266,9 +268,15 @@ wc -l corrective-audited.txt corrective-book.txt
 ```
 
 The result is `corrective-book.txt`; the GUI auto-loads it alongside
-`opening-book.txt` (their keys cannot collide). The 3-stone pilot audited
-all 245 positions and found **50 corrections (20 %)** — 36 preserving a
-win, 14 a draw. Two are direct replies to a human opening: when the
+`opening-book.txt` (their keys cannot collide). The full audit covers
+every position up to **five stones** (4 508 engine-to-move positions,
+~17 bookless solver hours): **672 corrections** — 50 from the 3-stone
+band (20 % of its 245 positions), 618 from the 5-stone band (4 263
+positions, 14.5 %). The 5-stone verdicts alone are instructive: after
+three arbitrary first-player moves the human is still winning in only
+25 % of positions, has drifted to a draw in 16 %, and has handed the
+engine a won game in 58 % — the book makes sure the engine collects.
+Two corrections are direct replies to a human opening: when the
 human opens on `2`, only `2,3` keeps the engine's win, and after
 an `6` opening only `6,5` does — the engine's search prefers the centre and
 lets both slip. The rest are positions where the

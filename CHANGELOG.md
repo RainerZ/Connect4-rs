@@ -9,7 +9,9 @@ on play stays observable — see the README's branch overview.
 
 - learn from lost games (L key) and option --tutor
 - book comments, GUI polish
-- corrective-book enlarged to 5 stone
+- corrective book enlarged to 5 stones: 4 508 positions audited, 672
+  corrections (after three arbitrary first-player moves the engine has a
+  won game in 58 % of positions - and now knows how to collect) 
 
 ## [V1.3.0](https://github.com/RainerZ/Connect4-rs/tree/V1.3.0) — 2026-08-26
 

@@ -20,7 +20,7 @@ import sys
 book = sys.argv[1] if len(sys.argv) > 1 else "corrective-book.txt"
 entries = []
 for line in open(book):
-    parts = line.split()
+    parts = line.split('#')[0].split()   # ignore provenance comments
     if len(parts) == 3:
         entries.append((parts[0], int(parts[1])))
 print(f"validating {len(entries)} entries from {book}")
