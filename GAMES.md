@@ -1,4 +1,4 @@
-# Game records: Claude (Fable 5) vs. the engine
+# Game records
 
 All games played 2026-08-23/24 over the MCP interface, engine at the 2 s
 default budget unless noted (game 9: Pascal Pons' perfect solver in the
@@ -123,7 +123,7 @@ converted on stone 41, the latest a perfect defender can be beaten.
 
 
 
-## 11 — V1.3.0 **engine lost against kimi-k3**
+## 11 — V1.3.0 **engine lost against kimi-k3**· Kimi red, 23 plies
 
 kimi-k3 on red, llm hints on, budget 2s, · **kimi-k3 wins**, engine resigns after 23 plies
 Connect4-rs v1.3.0 with 50 line corrective book.  
@@ -160,9 +160,12 @@ fascinating way:
 | 11 | `4,4,3,5,2,1,4,3,5,2,1` | engine wins (+1), **only column 5** | 3 | **THREW IT** (c scores −2) |
 | 13–21 | … | lost (−2) | … | best resistance to the end ✓ |
 
-So the real drama: kimi blundered first (ply 3, 3 handed the engine a won game), the engine held that win for eight plies — through exactly the band the corrective book covers, playing correctly everywhere — and then returned the favor at stone 11, in a needle-sharp position where only the e-column wins. Everything after was kimi flawlessly converting a theoretically won game; the celebrated zugzwang construction was the execution, not the turning point.
+So the real drama: kimi blundered first (ply 3, 3 handed the engine a won game), the engine held that win for eight plies — through exactly the band the V1.3.0 corrective book covers, playing correctly everywhere — and then returned the favor at stone 11, in a needle-sharp position where only the e-column wins. Everything after was kimi flawlessly converting a theoretically won game; the celebrated zugzwang construction was the execution, not the turning point.
 
-## 12 — V1.4.0 combined engine + 672-entry corrective book · Claude red, hints on · engine wins, 30 plies
+The new V1.4.0 5 ply corrective-book turnes this into an engine win.  
+
+
+## 12 — V1.4.0 engine **won against fable 5.1**· Claude red, 30 plies, corrective-book not used
 
 ```
 4,4,4,4,4,5,5,5,5,7,3,2,7,2,7,5,7,7,2,4,2,5,7,3,3,3,3,3,1,1
