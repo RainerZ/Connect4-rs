@@ -161,3 +161,30 @@ fascinating way:
 | 13–21 | … | lost (−2) | … | best resistance to the end ✓ |
 
 So the real drama: kimi blundered first (ply 3, 3 handed the engine a won game), the engine held that win for eight plies — through exactly the band the corrective book covers, playing correctly everywhere — and then returned the favor at stone 11, in a needle-sharp position where only the e-column wins. Everything after was kimi flawlessly converting a theoretically won game; the celebrated zugzwang construction was the execution, not the turning point.
+
+## 12 — V1.4.0 combined engine + 672-entry corrective book · Claude red, hints on · engine wins, 30 plies
+
+```
+4,4,4,4,4,5,5,5,5,7,3,2,7,2,7,5,7,7,2,4,2,5,7,3,3,3,3,3,1,1
+```
+
+Claude held the theoretical first-player win for ten plies — the centre
+stack and e2, e4 are all solver-correct — then threw it with the
+"prophylactic" c1 at ply 11 (solver: b1, d6 or e5 keep the win; c1 scores
+−3). The engine punished it with best-resistance-to-win moves throughout,
+and finished with a triple-purpose c2: it forced the c3 block, completed
+b2–c2–d2 with a2 as a stacked win square above Claude's a1, and left every
+remaining column poisoned (a1 → a2, b5 → b6, f1 → f2) — total zugzwang,
+row 2 completed on stone 30.
+
+The new corrective book never fired: the audit had already certified the
+engine's own replies in this line's first five stones, and Claude's mistake
+came at stone 11 — beyond the corrective horizon, in the engine's own
+search territory, where a fat +3 win is easy to collect. The mirror image
+of game 11.
+
+| ply | position after | verdict (red view) | best | Claude played | judgment |
+|---|---|---|---|---|---|
+| 1–9 | … | WIN (+1) throughout | 4, 4, 4, {2,5}, 5 | 4, 4, 4, 5, 5 | all correct ✓ |
+| 11 | `4,4,4,4,4,5,5,5,5,7` | WIN (+1) | 2, 4, 5 | 3 | **THREW IT** (c1 scores −3) |
+| 13–29 | … | lost (−3 … −7) | … | … | best resistance ✓ |

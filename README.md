@@ -494,7 +494,7 @@ commands above.
 
 ### Results so far
 
-Claude (Fable 5) vs. the engine seat: **7 – 2** (including one game
+Claude (Fable 5) vs. the engine seat: **8 – 2** (including one game
 against the perfect solver). Every engine version won in its own
 characteristic way — which is what this repo is about.
 

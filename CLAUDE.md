@@ -13,7 +13,7 @@ them; land new work on `main` (or a new branch merged into `main`).
 
 The README's "Results so far" section is the running record of
 Claude-vs-engine games — update it after notable games. Score at the time
-of writing: engine 6 – Claude 2.
+of writing: engine seat 8 – Claude 2 (games in docs/games.md).
 
 ## Workflow
 
